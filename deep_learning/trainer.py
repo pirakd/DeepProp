@@ -29,18 +29,19 @@ class Trainer():
 
 
 class ClassifierTrainer(Trainer):
-    def __init__(self, n_epochs, criteria, intermediate_criteria, intermediate_loss_weight,  optimizer, eval_metric, eval_interval, device, verbose=3, early_stop=None):
+    def __init__(self, n_epochs, criteria, intermediate_criteria, intermediate_loss_weight,  optimizer,
+                 eval_metric, eval_interval, device, verbose=3, early_stop=None):
         super().__init__(n_epochs, criteria, optimizer, eval_metric, eval_interval, device, verbose, early_stop)
         self.intermediate_criteria = intermediate_criteria
         self.intermediate_loss_weight = torch.tensor(intermediate_loss_weight, requires_grad=False).to(self.device)
 
 
-    def train(self, train_loader, eval_loader, model):
+    def train(self, train_loader, eval_loader, model, max_evals_no_improvement=8):
         self.losses = {'train': [], 'validation': []}
         self.metrics = {'train': [], 'validation': []}
 
-        self.best_epoch = None
-        self.best_model = None
+        best_eval_loss = np.inf
+        no_improvement_counter = 0
 
         n_batches_per_epoch = int(np.ceil(len(train_loader.dataset) / train_loader.batch_size))
         n_samples_per_epoch = len(train_loader.dataset)
@@ -60,7 +61,19 @@ class ClassifierTrainer(Trainer):
                 self.metrics['validation'].append(eval_acc)
                 print('epoch {},test_loss:{:.2e}, test_acc: {:.2f}, test_auc: {:.2f}'.format(epoch, avg_eval_loss, eval_acc, eval_auc))
 
-        return model
+                if avg_eval_loss < best_eval_loss:
+                    best_eval_loss =avg_eval_loss
+                    no_improvement_counter = 0
+                    best_auc, best_acc, best_epoch = eval_auc, eval_acc, epoch
+
+                else:
+                    no_improvement_counter += 1
+
+                if no_improvement_counter == max_evals_no_improvement:
+                    print('early stopping on epoch {}'.format(epoch))
+                    return best_eval_loss, best_acc, best_auc, best_epoch
+
+        return best_eval_loss, best_acc, best_auc, best_epoch
 
     def train_single_epoch(self, model, train_loader):
         epoch_loss = 0
