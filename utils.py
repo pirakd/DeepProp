@@ -3,8 +3,9 @@ import numpy as np
 import networkx
 import math
 import scipy
-from functools import partial
-
+from os import path, makedirs
+from datetime import datetime
+import json
 
 def read_network(network_filename):
     return pandas.read_table(network_filename, header=None, usecols=[0,1,2], index_col=[0,1])
@@ -113,3 +114,19 @@ def get_pulling_func(pulling_func_name):
         return MaskedSum
     else:
         assert 0, '{} is not a vallid pulling operation function name'.format(pulling_func_name)
+
+
+def get_root_path():
+    return path.dirname(path.realpath(__file__))
+
+
+def get_time():
+    return datetime.today().strftime('%d_%m_%Y__%H_%M_%S')
+
+
+def log_results(results_dict, results_path):
+    time = get_time()
+    file_path = path.join(results_path, time)
+    with open(file_path, 'w') as f:
+        json.dump(results_dict, f, indent=4, separators=(',', ': '))
+
