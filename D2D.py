@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn import linear_model
+from sklearn.metrics import precision_recall_curve, auc
 
 
 def generate_D2D_features(source_features, terminal_featues):
