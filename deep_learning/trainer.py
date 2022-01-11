@@ -29,9 +29,10 @@ class Trainer():
 
 
 class ClassifierTrainer(Trainer):
-    def __init__(self, n_epochs, criteria, intermediate_criteria,  optimizer, eval_metric, eval_interval, device, verbose=3, early_stop=None):
+    def __init__(self, n_epochs, criteria, intermediate_criteria, intermediate_loss_weight,  optimizer, eval_metric, eval_interval, device, verbose=3, early_stop=None):
         super().__init__(n_epochs, criteria, optimizer, eval_metric, eval_interval, device, verbose, early_stop)
         self.intermediate_criteria = intermediate_criteria
+        self.intermediate_loss_weight = torch.tensor(intermediate_loss_weight, requires_grad=False).to(self.device)
 
 
     def train(self, train_loader, eval_loader, model):
@@ -65,16 +66,15 @@ class ClassifierTrainer(Trainer):
         epoch_loss = 0
         intermediate_loss = 0
         hits = 0
+
         for source_batch, terminal_batch, labels_batch in train_loader:
             self.optimizer.zero_grad()
             out, pred, pre_pred = model(source_batch, terminal_batch)
             intermediate_loss = self.intermediate_criteria(torch.squeeze(torch.sigmoid(pre_pred)),
                                     torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.float64))
-            # scaled_intermediate_loss = torch.divide(intermediate_loss, model.n_experiments)
-            p = torch.tensor(0.75, requires_grad=False)
 
-            loss = ((1-p) * self.criteria(out, labels_batch)) + (p * intermediate_loss)
-            # loss = scaled_intermediate_loss
+            loss = ((1-self.intermediate_loss_weight) * self.criteria(out, labels_batch)) +\
+                   (self.intermediate_loss_weight * intermediate_loss)
             loss.backward()
             self.optimizer.step()
 
@@ -89,6 +89,7 @@ class ClassifierTrainer(Trainer):
         eval_loss = 0
         intermediate_eval_loss = 0
         hits = 0
+
         all_outs = []
         all_labels = []
         for source_batch, terminal_batch, labels_batch in eval_loader:
@@ -98,16 +99,17 @@ class ClassifierTrainer(Trainer):
             out, pred, pre_pred = model(source_batch, terminal_batch)
             intermediate_loss = self.intermediate_criteria(torch.squeeze(torch.sigmoid(pre_pred)),
                                     torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.float64))
-            scaled_intermediate_loss = torch.divide(intermediate_loss, model.n_experiments)
-            loss = self.criteria(out, labels_batch) + scaled_intermediate_loss
+
+            loss = (1-self.intermediate_loss_weight) * self.criteria(out, labels_batch) +\
+                   (self.intermediate_loss_weight * intermediate_loss)
             eval_loss += loss.item()
-            intermediate_eval_loss += scaled_intermediate_loss
+            intermediate_eval_loss += intermediate_loss
             hits += torch.sum(pred == labels_batch).item()
             all_outs.append(out)
             all_labels.append(labels_batch)
 
-        probs = torch.nn.functional.softmax(torch.squeeze(torch.stack(all_outs)), dim=1).detach().numpy()
-        all_labels = torch.squeeze(torch.stack(all_labels))
+        probs = torch.nn.functional.softmax(torch.squeeze(torch.cat(all_outs, 0)), dim=1).detach().numpy()
+        all_labels = torch.squeeze(torch.cat(all_labels))
         precision, recall, thresholds = precision_recall_curve(all_labels, probs[:, 1])
         mean_auc = auc(recall, precision)
         return eval_loss, intermediate_eval_loss, hits, mean_auc

@@ -3,7 +3,7 @@ import numpy as np
 import networkx
 import math
 import scipy
-import sklearn
+from functools import partial
 
 
 def read_network(network_filename):
@@ -103,3 +103,13 @@ def normalize_features(source_features, terminal_features, eps=1e-8):
 
     return source_features, terminal_features
 
+
+def get_pulling_func(pulling_func_name):
+    from deep_learning.deep_utils import MaskedSum, MaskedMean
+
+    if pulling_func_name == 'mean':
+        return MaskedMean
+    elif pulling_func_name == 'sum':
+        return MaskedSum
+    else:
+        assert 0, '{} is not a vallid pulling operation function name'.format(pulling_func_name)
