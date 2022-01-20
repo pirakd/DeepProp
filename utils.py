@@ -1,40 +1,76 @@
-import pandas
 import numpy as np
-import networkx
+import networkx as nx
 import math
 import scipy
 from os import path, makedirs
 from datetime import datetime
 import json
-
-def read_network(network_filename):
-    return pandas.read_table(network_filename, header=None, usecols=[0,1,2], index_col=[0,1])
+import pandas as pd
 
 
-def read_directed_interactions(directed_interactions_filename, type=None):
-    directed_interactions = pandas.read_table(directed_interactions_filename, header=None, skiprows=1, usecols=[0,1,2,3], index_col=[0,1])
-    if type:
-        directed_interactions = directed_interactions[directed_interactions[2] == 'TRUE_' + type]
+def balance_dataset(network, directed_interactions):
+    graph = nx.from_pandas_edgelist(network.reset_index(), 0, 1, 'edge_score')
+    directed_interactions = directed_interactions[directed_interactions.index.get_level_values(0).isin(graph) & directed_interactions.index.get_level_values(1).isin(graph)]
+    degree = dict(graph.degree(weight='edge_score'))
+    source_more_central = np.array([degree[s]>degree[t] for s, t in directed_interactions.index])
+    larger_indexes = np.nonzero(source_more_central)[0]
+    smaller_indexes = np.nonzero(1-source_more_central)[0]
+    if larger_indexes.size > smaller_indexes.size:
+        larger_indexes = np.random.choice(larger_indexes, smaller_indexes.size, replace=False)
     else:
-        directed_interactions = directed_interactions[directed_interactions[2] != "biogrid"]
-    return directed_interactions[[3]].rename(columns={3:2})
+        smaller_indexes = np.random.choice(smaller_indexes, larger_indexes.size, replace=False)
+    return directed_interactions.iloc[np.sort(np.hstack([smaller_indexes, larger_indexes]))]
 
 
-def read_priors(priors_filename):
-    return pandas.read_table(priors_filename, header=None).groupby(0)[1].apply(set).to_dict()
+def read_network(network_filename, translator):
+    network = pd.read_table(network_filename, header=None, usecols=[0, 1, 2], index_col=[0, 1]).rename(
+        columns={2: 'edge_score'})
+    if translator:
+        gene_ids = set(network.index.get_level_values(0)).union(set(network.index.get_level_values(1)))
+        up_do_date_ids = translator.translate(gene_ids, 'entrez_id', 'entrez_id')
+        network.rename(index=up_do_date_ids, inplace=True)
+    return network
+
+def read_directed_interactions(directed_interactions_filename, gene_translator):
+    directed_interactions = pd.read_table(directed_interactions_filename, usecols=['GENE', 'SUB_GENE'])
+    genes = pd.unique(directed_interactions[['GENE', 'SUB_GENE']].values.ravel())
+    symbol_to_entrez = gene_translator.translate(genes, 'symbol', 'entrez_id')
+    has_translation = directed_interactions['GENE'].isin(symbol_to_entrez) & directed_interactions['SUB_GENE'].isin(symbol_to_entrez)
+    not_self_edge = directed_interactions['GENE'].ne(directed_interactions['SUB_GENE'])
+    directed_interactions = directed_interactions[has_translation & not_self_edge]
+    directed_interactions.replace(symbol_to_entrez, inplace=True)
+    directed_interactions['edge_score'] = 0.8
+    directed_interactions.rename(columns={'GENE':'KIN_GENE'}, inplace=True)
+    directed_interactions.index = pd.MultiIndex.from_arrays(directed_interactions[['KIN_GENE', 'SUB_GENE']].values.T)
+    directed_interactions = directed_interactions[~directed_interactions.index.duplicated(keep='first')]
+
+    return directed_interactions[['edge_score']]
 
 
-def read_data(network_filename, directed_interaction_filename, sources_filename, terminals_filename, type=None):
-    network = read_network(network_filename)
-    directed_interactions = read_directed_interactions(directed_interaction_filename, type)
-    sources = read_priors(sources_filename)
-    terminals = read_priors(terminals_filename)
-    return network, directed_interactions, sources, terminals
+def read_priors(sources_filename, terminals_filename):
+    source_priors = pd.read_table(sources_filename, header=None).groupby(0)[1].apply(set).to_dict()
+    terminal_priors = pd.read_table(terminals_filename, header=None).groupby(0)[1].apply(set).to_dict()
+    return source_priors, terminal_priors
+
+
+def read_data(network_filename, directed_interaction_filename, sources_filename, terminals_filename):
+    from gene_name_translator.gene_translator import GeneTranslator
+    translator = GeneTranslator(verbosity=False)
+    translator.load_dictionary()
+
+    network = read_network(network_filename, translator)
+    directed_interactions = read_directed_interactions(directed_interaction_filename, translator)
+    merged_network =\
+        pd.concat([network.drop(directed_interactions.index.intersection(network.index)), directed_interactions,])
+
+    directed_interactions = balance_dataset(merged_network, directed_interactions)
+    sources, terminals = read_priors(sources_filename, terminals_filename)
+    return merged_network, directed_interactions, sources, terminals
 
 
 def generate_similarity_matrix(graph, propagate_alpha):
     genes = sorted(graph.nodes)
-    matrix = networkx.to_scipy_sparse_matrix(graph, genes, weight=2)
+    matrix = nx.to_scipy_sparse_matrix(graph, genes, weight=2)
     norm_matrix = scipy.sparse.diags(1 / np.sqrt(matrix.sum(0).A1))
     matrix = norm_matrix * matrix * norm_matrix
     return propagate_alpha * matrix, genes
@@ -56,7 +92,7 @@ def propagate(seeds, matrix, gene_indexes, num_genes, propagate_alpha, propagate
 
 
 def generate_propagate_data(network, propagate_alpha):
-    graph = networkx.from_pandas_edgelist(network.reset_index(), 0, 1, 2)
+    graph = nx.from_pandas_edgelist(network.reset_index(), 0, 1, 'edge_score')
     matrix, genes = generate_similarity_matrix(graph, propagate_alpha)
     num_genes = len(genes)
     gene_indexes = dict([(gene, index) for (index, gene) in enumerate(genes)])
