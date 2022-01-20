@@ -20,7 +20,7 @@ class DeepProp(nn.Module):
         self.pulling_op = pulling_op
         self.experiment_embedding_size = experiment_embedding_size
         self.experiment_embedding = torch.nn.Embedding(self.n_experiments, self.experiment_embedding_size)
-
+        self.register_buffer('experiment_vector', torch.arange(n_experiments,dtype=torch.long))
         feature_extractor = self.init_feature_extractor(feature_extractor_layers_size)
         classifier = self.init_classifier(feature_extractor_layers_size[-1], classifier_layers_size)
         self.source_model = InvarianceModel(feature_extractor, pulling_op)
@@ -52,7 +52,7 @@ class DeepProp(nn.Module):
         x_t = self.terminal_model(t)
         combined = torch.cat([x_s, x_t], 1)
         if self.experiment_embedding_size:
-            experiment_vector = torch.arange(0, self.n_experiments, dtype=torch.int).repeat(int(x_s.shape[0]/self.n_experiments))
+            experiment_vector = self.experiment_vector.repeat(int(x_s.shape[0]/self.n_experiments))
             experiment_embeddings = self.experiment_embedding(experiment_vector)
             combined = torch.cat([combined, experiment_embeddings], 1)
         logits = self.classifier(combined)
