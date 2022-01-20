@@ -39,7 +39,7 @@ class ClassifierTrainer(Trainer):
     def train(self, train_loader, eval_loader, model, max_evals_no_improvement=8):
         self.losses = {'train': [], 'validation': []}
         self.metrics = {'train': [], 'validation': []}
-
+        best_loss, best_auc, best_acc, best_epoch, best_precision, best_recall = 0,0,0,0,0,0
         best_eval_loss = np.inf
         no_improvement_counter = 0
 
@@ -54,7 +54,7 @@ class ClassifierTrainer(Trainer):
             print('epoch {}, train_loss: {:.2e}, intermediate_loss:{:.2e} train_acc:{:.2f}'
                   .format(epoch, self.losses['train'][-1], epoch_intermediate_loss/n_batches_per_epoch,  epoch_hits/n_samples_per_epoch))
             if np.mod(epoch, self.eval_interval) == 0 and epoch:
-                eval_loss, eval_intermediate_loss, eval_hits, eval_auc = self.eval(model, eval_loader)
+                eval_loss, eval_intermediate_loss, eval_hits, eval_auc, precision, recall = self.eval(model, eval_loader)
                 avg_eval_loss = eval_loss / n_test_batches_per_epoch
                 eval_acc = eval_hits/len(eval_loader.dataset)
                 self.losses['validation'].append(avg_eval_loss)
@@ -64,16 +64,16 @@ class ClassifierTrainer(Trainer):
                 if avg_eval_loss < best_eval_loss:
                     best_eval_loss =avg_eval_loss
                     no_improvement_counter = 0
-                    best_auc, best_acc, best_epoch = eval_auc, eval_acc, epoch
+                    best_loss, best_auc, best_acc, best_epoch, best_precision, best_recall = avg_eval_loss, eval_auc, eval_acc, epoch, precision, recall
 
                 else:
                     no_improvement_counter += 1
 
                 if no_improvement_counter == max_evals_no_improvement:
                     print('early stopping on epoch {}'.format(epoch))
-                    return best_eval_loss, best_acc, best_auc, best_epoch
+                    return best_eval_loss, best_acc, best_auc, best_epoch, best_precision, best_recall
 
-        return best_eval_loss, best_acc, best_auc, best_epoch
+        return best_eval_loss, best_acc, best_auc, best_epoch, best_precision, best_recall
 
     def train_single_epoch(self, model, train_loader):
         epoch_loss = 0
@@ -82,6 +82,9 @@ class ClassifierTrainer(Trainer):
 
         for source_batch, terminal_batch, labels_batch in train_loader:
             self.optimizer.zero_grad()
+            if self.device != 'cpu':
+                source_batch, terminal_batch, labels_batch =\
+                    (x.to(self.device) for x in[source_batch, terminal_batch, labels_batch])
             out, pred, pre_pred = model(source_batch, terminal_batch)
             intermediate_loss = self.intermediate_criteria(torch.squeeze(torch.sigmoid(pre_pred)),
                                     torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.float64))
@@ -122,7 +125,7 @@ class ClassifierTrainer(Trainer):
             all_labels.append(labels_batch)
 
         probs = torch.nn.functional.softmax(torch.squeeze(torch.cat(all_outs, 0)), dim=1).detach().numpy()
-        all_labels = torch.squeeze(torch.cat(all_labels))
+        all_labels = torch.squeeze(torch.cat(all_labels)).cpu().detach().numpy()
         precision, recall, thresholds = precision_recall_curve(all_labels, probs[:, 1])
         mean_auc = auc(recall, precision)
-        return eval_loss, intermediate_eval_loss, hits, mean_auc
+        return eval_loss, intermediate_eval_loss, hits, mean_auc, precision, recall
