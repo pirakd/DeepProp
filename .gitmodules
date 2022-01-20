@@ -1,6 +1,3 @@
-[submodule "DeepProp"]
-	path = DeepProp
-	url = https://github.com/pirakd/DeepProp.git
 [submodule "gene_name_translator"]
 	path = gene_name_translator
 	url = https://github.com/pirakd/gene_name_translator.git
