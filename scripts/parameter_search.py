@@ -1,5 +1,8 @@
-import pandas
-from os import path, makedirs
+from os import path
+import sys
+sys.path.append(path.dirname(path.dirname(path.realpath(__file__))))
+import pandas as pd
+from os import makedirs
 from deep_learning.data_loaders import ClassifierDataset, train_test_split
 from deep_learning.models import DeepPropClassifier, DeepProp
 from deep_learning.trainer import ClassifierTrainer
@@ -9,17 +12,18 @@ from torch.optim import Adam
 from utils import read_data, generate_feature_columns, normalize_features, get_pulling_func, log_results, get_root_path
 import torch
 import random
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 output_folder = 'output'
 output_file_path = path.join(get_root_path(), output_folder)
 makedirs(output_file_path, exist_ok=True)
 
-input_file = path.join('DrugsInfo', 'input')
-NETWORK_FILENAME = path.join(input_file, "H_sapiens.net")
-DIRECTED_INTERACTIONS_FILENAME = path.join(input_file, "consensus.net")
-SOURCES_FILENAME = path.join(input_file, "drug_targets.txt")
-TERMINALS_FILENAME = path.join(input_file, "drug_expressions.txt")
+root_path = get_root_path()
+input_file = path.join(root_path, 'input')
+NETWORK_FILENAME = path.join(input_file, 'networks', "H_sapiens.net")
+DIRECTED_INTERACTIONS_FILENAME = path.join(input_file, 'directed_interactions', "KPI_dataset")
+SOURCES_FILENAME = path.join(input_file, 'priors', "drug_targets.txt")
+TERMINALS_FILENAME = path.join(input_file, 'priors', "drug_expressions.txt")
 torch.set_default_dtype(torch.float64)
 
 args = {
@@ -30,7 +34,7 @@ args = {
     'propagation':
         {'alpha': 0.8,
          'eps': 1e-6,
-         'n_iterations': 1},
+         'n_iterations': 6},
     'model':
         {'feature_extractor_layers': [64, 32, 16],
          'classifier_layers': [32, 16, 8],
@@ -39,27 +43,24 @@ args = {
     'train':
         {'intermediate_loss_weight': 0.95,
          'train_test_ratio': 0.8,
-         'train_batch_size': 16,
+         'train_batch_size': 32,
          'test_batch_size': 32,
-         'n_epochs': 300,
+         'n_epochs': 6,
          'eval_interval': 5,
          'learning_rate': 1e-3}}
 
 # data read
 network, directed_interactions, sources, terminals =\
-    read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME,
-                                                               args['data']['dataset_type'])
-merged_network = pandas.concat([directed_interactions, network.drop(directed_interactions.index & network.index)])
+    read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME)
 directed_interactions_pairs_list = tuple(directed_interactions.index)
-pairs_to_index = {pair: p for p, pair in enumerate(merged_network.index)}
-
+pairs_to_index = {pair: p for p, pair in enumerate(network.index)}
 directed_interaction_set = set(directed_interactions_pairs_list)
 labeled_pairs_to_index = {pair: idx for pair, idx in pairs_to_index.items() if pair in directed_interaction_set}
 
 indexes_to_keep = list(labeled_pairs_to_index.values())
 
 # feature generation
-source_features, terminal_features = generate_feature_columns(merged_network, sources, terminals, indexes_to_keep,
+source_features, terminal_features = generate_feature_columns(network, sources, terminals, indexes_to_keep,
                                                               args['propagation']['alpha'], args['propagation']['n_iterations'],
                                                               args['propagation']['eps'], args['data']['n_experiments'])
 
@@ -74,11 +75,12 @@ train_terminal_features = [x[train_indexes] for x in terminal_features]
 test_terminal_features = [x[test_indexes] for x in terminal_features]
 
 
-feature_extractor_layers = [ [64, 32, 16], [32,16], [64,32], [32, 16, 8], [16, 16, 16]]
-classifier_layers = [[32, 16, 8], [16, 8], [32, 16], [64, 32, 16]]
-learning_rate = [1e-4, 5e-4, 1e-3, 5e-3, 1e-2]
-intermediate_loss_weight = [0.5, 0.8, 0.95, 0.99]
-exp_embedding_size = [4, 8]
+feature_extractor_layers = [[128,64], [64, 32, 16], [64,32], [16, 8]]
+classifier_layers = [[128, 64, 32], [128, 64], [32, 16, 8],  [32, 16], [64, 32, 16]]
+learning_rate = [1e-4, 5e-4, 1e-3, 5e-3, 5e-5]
+intermediate_loss_weight = [0.25, 0.5, 0.75, 0.9, None]
+train_batch_size = [16, 32, 64]
+exp_embedding_size = [None, 4, 8, 12, 16]
 
 while True:
     args['model']['feature_extractor_layers'] = random.choice(feature_extractor_layers)
@@ -86,7 +88,7 @@ while True:
     args['train']['learning_rate'] = random.choice(learning_rate)
     args['train']['intermediate_loss_weight'] = random.choice(intermediate_loss_weight)
     args['model']['exp_emb_size'] = random.choice(exp_embedding_size)
-
+    args['train']['train_batch_size'] = random.choice(train_batch_size)
 
     train_dataset = ClassifierDataset(train_source_features, train_terminal_features)
     test_dataset = ClassifierDataset(test_source_features, test_terminal_features)
@@ -106,9 +108,9 @@ while True:
                                 intermediate_loss_weight=args['train']['intermediate_loss_weight'],
                                 optimizer=optimizer, eval_metric=None, eval_interval=args['train']['eval_interval'], device=device)
 
-    best_eval_loss, best_acc, best_auc, best_epoch = trainer.train(train_loader=train_loader, eval_loader=eval_loader, model=model)
+    best_eval_loss, best_acc, best_auc, best_epoch, best_precision, best_recall = trainer.train(train_loader=train_loader, eval_loader=eval_loader, model=model)
 
-    results_dict = {'args': args, 'best_eval_loss':best_eval_loss, 'best_acc':best_acc,
+    results_dict = {'args': args, 'best_eval_loss':best_eval_loss, 'best_acc': best_acc,
                     'best_auc': best_auc, 'best_epoch': best_epoch}
 
-    log_results(results_dict, 'output')
+    log_results(results_dict, output_file_path)

@@ -20,7 +20,7 @@ torch.set_default_dtype(torch.float64)
 
 args = {
     'data':
-        {'n_experiments': 5,
+        {'n_experiments': 1,
          'train_test_split': 0.8},
     'propagation':
         {'alpha': 0.8,
@@ -30,9 +30,9 @@ args = {
         {'feature_extractor_layers': [64, 32, 16],
          'classifier_layers': [32, 16, 8],
          'pulling_func': 'mean',
-         'exp_emb_size': 12},
+         'exp_emb_size': None},
     'train':
-        {'intermediate_loss_weight': 0.5,
+        {'intermediate_loss_weight': 0.2,
          'train_test_ratio': 0.8,
          'train_batch_size': 16,
          'test_batch_size': 32,
