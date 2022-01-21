@@ -18,9 +18,14 @@ class DeepProp(nn.Module):
         super(DeepProp, self).__init__()
         self.n_experiments = n_experiments
         self.pulling_op = pulling_op
+
         self.experiment_embedding_size = experiment_embedding_size
-        self.experiment_embedding = torch.nn.Embedding(self.n_experiments, self.experiment_embedding_size)
-        self.register_buffer('experiment_vector', torch.arange(n_experiments,dtype=torch.long))
+        if experiment_embedding_size:
+            self.experiment_embedding = torch.nn.Embedding(self.n_experiments, self.experiment_embedding_size)
+            self.register_buffer('experiment_vector', torch.arange(n_experiments,dtype=torch.long))
+        else:
+            self.experiment_embedding = None
+
         feature_extractor = self.init_feature_extractor(feature_extractor_layers_size)
         classifier = self.init_classifier(feature_extractor_layers_size[-1], classifier_layers_size)
         self.source_model = InvarianceModel(feature_extractor, pulling_op)
@@ -38,7 +43,11 @@ class DeepProp(nn.Module):
 
     def init_classifier(self, last_feature_dim, c_layers_size):
         classifier_layers = []
-        classifier_layers.append(nn.Linear((2 * last_feature_dim) + self.experiment_embedding_size, c_layers_size[0]))
+        if self.experiment_embedding_size:
+            classifier_layers.append(nn.Linear((2 * last_feature_dim) + self.experiment_embedding_size, c_layers_size[0]))
+        else:
+            classifier_layers.append(nn.Linear((2 * last_feature_dim), c_layers_size[0]))
+
         classifier_layers.append(nn.ReLU(inplace=True))
         for idx in range(len(c_layers_size))[:-1]:
             classifier_layers.append(nn.Linear(c_layers_size[idx], c_layers_size[idx + 1]))
