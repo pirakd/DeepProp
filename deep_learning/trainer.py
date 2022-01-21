@@ -108,6 +108,7 @@ class ClassifierTrainer(Trainer):
             if self.intermediate_loss_weight:
                 intermediate_loss = self.intermediate_criteria(torch.squeeze(torch.sigmoid(pre_pred)),
                                         torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.float64))
+                epoch_intermediate_loss += intermediate_loss.item()
 
                 loss = ((1-self.intermediate_loss_weight) * classifier_loss) +\
                        (self.intermediate_loss_weight * intermediate_loss)
@@ -118,7 +119,6 @@ class ClassifierTrainer(Trainer):
             self.optimizer.step()
 
             epoch_loss += loss.item()
-            epoch_intermediate_loss += intermediate_loss.item()
             epoch_classifier_loss += classifier_loss.item()
             hits += torch.sum(pred == labels_batch).item()
 
@@ -143,6 +143,7 @@ class ClassifierTrainer(Trainer):
             if self.intermediate_loss_weight:
                 intermediate_loss = self.intermediate_criteria(torch.squeeze(torch.sigmoid(pre_pred)),
                                         torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.float64))
+                epoch_intermediate_eval_loss += intermediate_loss.item()
 
                 loss = ((1-self.intermediate_loss_weight) * classifier_loss) +\
                        (self.intermediate_loss_weight * intermediate_loss)
@@ -150,9 +151,7 @@ class ClassifierTrainer(Trainer):
                 loss = classifier_loss
 
             eval_loss += loss.item()
-            epoch_intermediate_eval_loss += intermediate_loss.item()
             epoch_classifier_loss += classifier_loss.item()
-
             hits += torch.sum(pred == labels_batch).item()
             all_outs.append(out)
             all_labels.append(labels_batch)
