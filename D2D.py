@@ -57,12 +57,12 @@ def eval_D2D(train_features, test_features):
     quantized_train_features = np.argsort(np.argsort(train_features, axis=1), axis=1)
     quantized_test_features = np.argsort(np.argsort(test_features, axis=1), axis=1)
 
-    clf = linear_model.LogisticRegression(solver='liblinear')
+    clf = linear_model.LogisticRegression(solver='liblinear', penalty='l1', C=0.001)
     probs = clf.fit(quantized_train_features, train_labels).predict_proba(quantized_test_features)
     acc = np.mean(np.argmax(probs, 1) == test_labels)
-    precision, recall, thresholds = precision_recall_curve(test_labels, probs[:,1])
+    precision, recall, thresholds = precision_recall_curve(test_labels, probs[:, 1])
     mean_auc = auc(recall, precision)
-    return probs, precision, recall, mean_auc
+    return probs,  test_labels
 
 def eval_D2D_2(train_features, test_features):
 
@@ -80,9 +80,9 @@ def eval_D2D_2(train_features, test_features):
     quantized_train_features = np.argsort(np.argsort(train_features, axis=1), axis=1)
     quantized_test_features = np.argsort(np.argsort(test_features, axis=1), axis=1)
 
-    clf = linear_model.LogisticRegression(solver='liblinear')
+    clf = linear_model.LogisticRegression(solver='liblinear', penalty='l1', C=0.001)
     probs = clf.fit(quantized_train_features, train_labels).predict_proba(quantized_test_features)
     acc = np.mean(np.argmax(probs, 1) == test_labels)
     precision, recall, thresholds = precision_recall_curve(test_labels, probs[:, 1])
     mean_auc = auc(recall, precision)
-    return probs, precision, recall, mean_auc
+    return probs, test_labels

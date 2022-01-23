@@ -3,6 +3,8 @@ import numpy as np
 from sklearn.metrics import roc_curve, auc
 from sklearn.metrics import precision_recall_curve
 from torch import Tensor
+import copy
+
 
 class Trainer():
     def __init__(self, n_epochs, criteria, optimizer, eval_metric,  eval_interval=1,  device='cpu', verbose=3, early_stop=None):
@@ -40,6 +42,7 @@ class ClassifierTrainer(Trainer):
 
 
     def train(self, train_loader, eval_loader, model, max_evals_no_improvement=8):
+        best_model = None
         self.losses = {'train': [], 'validation': []}
         self.metrics = {'train': [], 'validation': []}
         best_loss, best_auc, best_acc, best_epoch, best_precision, best_recall = 0,0,0,0,0,0
@@ -70,26 +73,23 @@ class ClassifierTrainer(Trainer):
                       .format(epoch, avg_eval_loss, avg_eval_classfier_loss, avg_eval_intermediate_loss,
                               eval_acc, eval_auc))
 
-                if avg_eval_loss < best_eval_loss:
-                    best_eval_loss =avg_eval_loss
+                if best_auc < eval_auc:
+                    best_eval_loss = avg_eval_loss
                     no_improvement_counter = 0
                     best_loss, best_auc, best_acc, best_epoch, best_precision, best_recall = avg_eval_loss, eval_auc, eval_acc, epoch, precision, recall
+                    best_model = copy.deepcopy(model)
+
 
                 else:
                     no_improvement_counter += 1
 
                 if no_improvement_counter == max_evals_no_improvement:
                     print('early stopping on epoch {}'.format(epoch))
-                    return best_eval_loss, best_acc, best_auc, best_epoch, best_precision, best_recall
+                    break
 
-        epoch_loss, epoch_intermediate_loss, epoch_classifier_loss, epoch_hits = self.train_single_epoch(model,
-                                                                                                         train_loader)
-        self.losses['train'].append(epoch_loss / (n_batches_per_epoch))
-        self.metrics['train'].append(epoch_hits / n_samples_per_epoch)
-        print('epoch {}, train_loss: {:.2e}, classifier_loss: {:.2e}, intermediate_loss:{:.2e} train_acc:{:.2f}'
-              .format(epoch, self.losses['train'][-1], epoch_classifier_loss / n_batches_per_epoch,
-                      epoch_intermediate_loss / n_batches_per_epoch, epoch_hits / n_samples_per_epoch))
-        return best_eval_loss, best_acc, best_auc, best_epoch, best_precision, best_recall
+        train_stats = {'best_val_loss':best_eval_loss, 'best_acc':best_acc, 'best_auc':best_auc,
+                       'best_epoch':best_epoch}
+        return train_stats, best_model
 
     def train_single_epoch(self, model, train_loader):
         epoch_loss = 0
@@ -102,12 +102,15 @@ class ClassifierTrainer(Trainer):
             if self.device != 'cpu':
                 source_batch, terminal_batch, labels_batch =\
                     (x.to(self.device) for x in[source_batch, terminal_batch, labels_batch])
+            if torch.get_default_dtype() is torch.float32:
+                source_batch, terminal_batch, = source_batch.float(), terminal_batch.float()
+
             out, pred, pre_pred = model(source_batch, terminal_batch)
 
             classifier_loss = self.criteria(out, labels_batch)
             if self.intermediate_loss_weight:
                 intermediate_loss = self.intermediate_criteria(torch.squeeze(torch.sigmoid(pre_pred)),
-                                        torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.float64))
+                                        torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.get_default_dtype()))
                 epoch_intermediate_loss += intermediate_loss.item()
 
                 loss = ((1-self.intermediate_loss_weight) * classifier_loss) +\
@@ -125,7 +128,7 @@ class ClassifierTrainer(Trainer):
         return epoch_loss, epoch_intermediate_loss, epoch_classifier_loss, hits
 
 
-    def eval(self, model, eval_loader):
+    def eval(self, model, eval_loader, in_train=True):
         eval_loss = 0
         epoch_intermediate_eval_loss = 0
         epoch_classifier_loss = 0
@@ -137,12 +140,15 @@ class ClassifierTrainer(Trainer):
             if self.device != 'cpu':
                 source_batch, terminal_batch, labels_batch =\
                     (x.to(self.device) for x in[source_batch, terminal_batch, labels_batch])
+            if torch.get_default_dtype() is torch.float32:
+                source_batch, terminal_batch, = source_batch.float(), terminal_batch.float()
+
             out, pred, pre_pred = model(source_batch, terminal_batch)
 
             classifier_loss = self.criteria(out, labels_batch)
             if self.intermediate_loss_weight:
                 intermediate_loss = self.intermediate_criteria(torch.squeeze(torch.sigmoid(pre_pred)),
-                                        torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.float64))
+                                        torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.get_default_dtype()))
                 epoch_intermediate_eval_loss += intermediate_loss.item()
 
                 loss = ((1-self.intermediate_loss_weight) * classifier_loss) +\
@@ -156,8 +162,11 @@ class ClassifierTrainer(Trainer):
             all_outs.append(out)
             all_labels.append(labels_batch)
 
-        probs = torch.nn.functional.softmax(torch.squeeze(torch.cat(all_outs, 0)), dim=1).detach().numpy()
+        probs = torch.nn.functional.softmax(torch.squeeze(torch.cat(all_outs, 0)), dim=1).cpu().detach().numpy()
         all_labels = torch.squeeze(torch.cat(all_labels)).cpu().detach().numpy()
         precision, recall, thresholds = precision_recall_curve(all_labels, probs[:, 1])
         mean_auc = auc(recall, precision)
-        return eval_loss, epoch_intermediate_eval_loss, epoch_classifier_loss, hits, mean_auc, precision, recall
+        if in_train:
+            return eval_loss, epoch_intermediate_eval_loss, epoch_classifier_loss, hits, mean_auc, precision, recall
+        else:
+            return probs, all_labels

@@ -1,17 +1,20 @@
 import torch
 import torch.nn as nn
+from utils import get_pulling_func
 
 class InvarianceModel(nn.Module):
     def __init__(self, feature_extractor, pulling_op, drop_rate=None):
         super(InvarianceModel, self).__init__()
         self.feature_extractor = feature_extractor
-        self.pulling_op = pulling_op
+        self.pulling_op = get_pulling_func(pulling_op)
+
 
     def forward(self, x):
         mask = x[:,:,0] != 0
         x = self.feature_extractor(x)
         x = self.pulling_op(x, mask, dim=1)
         return x
+
 
 class DeepProp(nn.Module):
     def __init__(self, feature_extractor_layers_size, pulling_op, classifier_layers_size, n_experiments=1, experiment_embedding_size=None):

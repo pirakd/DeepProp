@@ -1,6 +1,7 @@
 from torch.utils.data import Dataset
 import numpy as np
 import torch
+
 class ClassifierDataset(Dataset):
     def __init__(self, source_features, terminal_features):
         self.n_experiments = len(source_features)
@@ -51,12 +52,5 @@ class ClassifierDataset(Dataset):
 
         source_samples = np.array(source_samples)
         terminal_samples = np.array(terminal_samples)
+
         return {'source': source_samples, 'terminal': terminal_samples, 'labels': batch_labels}
-
-
-def train_test_split(n_samples, train_test_ratio):
-    is_train = np.random.binomial(1, train_test_ratio, n_samples)
-    train_indexes = np.nonzero(is_train)[0]
-    test_indexes = np.nonzero(1 - is_train)[0]
-
-    return train_indexes, test_indexes

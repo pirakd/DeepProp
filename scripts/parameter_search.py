@@ -1,19 +1,20 @@
 from os import path
 import sys
 sys.path.append(path.dirname(path.dirname(path.realpath(__file__))))
-import pandas as pd
 from os import makedirs
-from deep_learning.data_loaders import ClassifierDataset, train_test_split
+from deep_learning.data_loaders import ClassifierDataset
 from deep_learning.models import DeepPropClassifier, DeepProp
 from deep_learning.trainer import ClassifierTrainer
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
-from utils import read_data, generate_feature_columns, normalize_features, get_pulling_func, log_results, get_root_path
+from utils import read_data, generate_feature_columns, normalize_features, log_results,\
+    get_root_path, train_test_split
 import torch
 import random
+import itertools
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda".format() if torch.cuda.is_available() else "cpu")
 output_folder = 'output'
 output_file_path = path.join(get_root_path(), output_folder)
 makedirs(output_file_path, exist_ok=True)
@@ -24,17 +25,17 @@ NETWORK_FILENAME = path.join(input_file, 'networks', "H_sapiens.net")
 DIRECTED_INTERACTIONS_FILENAME = path.join(input_file, 'directed_interactions', "KPI_dataset")
 SOURCES_FILENAME = path.join(input_file, 'priors', "drug_targets.txt")
 TERMINALS_FILENAME = path.join(input_file, 'priors', "drug_expressions.txt")
-torch.set_default_dtype(torch.float64)
+# torch.set_default_dtype(torch.float64)
 
 args = {
     'data':
-        {'n_experiments': 2,
+        {'n_experiments': 1,
          'train_test_split': 0.8,
          'dataset_type': 'balanced_kpi'},
     'propagation':
         {'alpha': 0.8,
          'eps': 1e-6,
-         'n_iterations': 6},
+         'n_iterations': 200},
     'model':
         {'feature_extractor_layers': [64, 32, 16],
          'classifier_layers': [32, 16, 8],
@@ -47,16 +48,24 @@ args = {
          'test_batch_size': 32,
          'n_epochs': 6,
          'eval_interval': 5,
-         'learning_rate': 1e-3}}
+         'learning_rate': 1e-3,
+         'max_evals_no_imp':10 }}
+
+device = torch.device("cuda".format() if torch.cuda.is_available() else "cpu")
+cmd_args = [int(arg) for arg in sys.argv[1:]]
+if len(cmd_args) == 2:
+    args['data']['n_experiments'] = cmd_args[1]
+    device = torch.device("cuda:{}".format(cmd_args[0]) if torch.cuda.is_available() else "cpu")
+    print('n_expriments: {}, device: {}'.format(args['data']['n_experiments'], device))
 
 # data read
 network, directed_interactions, sources, terminals =\
     read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME)
+
 directed_interactions_pairs_list = tuple(directed_interactions.index)
 pairs_to_index = {pair: p for p, pair in enumerate(network.index)}
 directed_interaction_set = set(directed_interactions_pairs_list)
 labeled_pairs_to_index = {pair: idx for pair, idx in pairs_to_index.items() if pair in directed_interaction_set}
-
 indexes_to_keep = list(labeled_pairs_to_index.values())
 
 # feature generation
@@ -96,8 +105,7 @@ while True:
                               pin_memory=True)
     eval_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True)
 
-    pulling_func = get_pulling_func(args['model']['pulling_func'])
-    deep_prop_model = DeepProp(args['model']['feature_extractor_layers'], pulling_func,
+    deep_prop_model = DeepProp(args['model']['feature_extractor_layers'], args['model']['pulling_func'],
                                args['model']['classifier_layers'], args['data']['n_experiments'],
                                args['model']['exp_emb_size'])
     model = DeepPropClassifier(deep_prop_model, args['data']['n_experiments'])
@@ -108,9 +116,9 @@ while True:
                                 intermediate_loss_weight=args['train']['intermediate_loss_weight'],
                                 optimizer=optimizer, eval_metric=None, eval_interval=args['train']['eval_interval'], device=device)
 
-    best_eval_loss, best_acc, best_auc, best_epoch, best_precision, best_recall = trainer.train(train_loader=train_loader, eval_loader=eval_loader, model=model)
+    train_stats =\
+        trainer.train(train_loader=train_loader, eval_loader=eval_loader, model=model, max_evals_no_improvement=args['train']['max_evals_no_imp'])
 
-    results_dict = {'args': args, 'best_eval_loss':best_eval_loss, 'best_acc': best_acc,
-                    'best_auc': best_auc, 'best_epoch': best_epoch}
+    results_dict = {'args': args, 'train_stats': train_stats}
 
     log_results(results_dict, output_file_path)

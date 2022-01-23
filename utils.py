@@ -141,6 +141,19 @@ def normalize_features(source_features, terminal_features, eps=1e-8):
     return source_features, terminal_features
 
 
+def train_test_split(n_samples, train_test_ratio, random_state:np.random.RandomState=None):
+    if random_state:
+        split = random_state.choice([0, 1, 2], n_samples, replace=True, p=train_test_ratio )
+    else:
+        split = np.random.choice([0, 1, 2], n_samples, replace=True, p=train_test_ratio, )
+
+    train_indexes = np.nonzero(split == 0)[0]
+    val_indexes = np.nonzero(split == 1)[0]
+    test_indexes = np.nonzero(split == 2)[0]
+
+    return train_indexes, val_indexes, test_indexes
+
+
 def get_pulling_func(pulling_func_name):
     from deep_learning.deep_utils import MaskedSum, MaskedMean
 
