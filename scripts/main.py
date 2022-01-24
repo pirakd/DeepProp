@@ -17,7 +17,6 @@ SOURCES_FILENAME = path.join(input_file, 'priors', "drug_targets.txt")
 TERMINALS_FILENAME = path.join(input_file, 'priors', "drug_expressions.txt")
 torch.set_default_dtype(torch.float64)
 
-
 args = {
     'data':
         {'n_experiments': 20,
@@ -34,8 +33,6 @@ args = {
     'train':
         {'intermediate_loss_weight': 0,
          'train_val_test_split' : [0.66, 0.14, 0.2], # sum([train, val, test])=1
-         'val_ratio' : 0.14,
-         'test_ratio' : 0.2,
          'train_batch_size': 32,
          'test_batch_size': 32,
          'n_epochs': 100,

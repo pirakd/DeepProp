@@ -1,3 +1,6 @@
+from os import path
+import sys
+sys.path.append(path.dirname(path.dirname(path.realpath(__file__))))
 from os import path, makedirs
 from deep_learning.data_loaders import ClassifierDataset
 from deep_learning.models import DeepPropClassifier, DeepProp
@@ -5,14 +8,16 @@ from deep_learning.trainer import ClassifierTrainer
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
-from utils import read_data, generate_feature_columns, normalize_features, get_root_path, train_test_split
+from utils import read_data, generate_feature_columns, normalize_features, get_root_path, train_test_split, get_time
 import torch
 from D2D import generate_D2D_features, eval_D2D, generate_D2D_features_2, eval_D2D_2
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import precision_recall_curve, auc
+from presets import experiments_20, experiments_50
+import json
 
-
+script_name = path.basename(__file__).split('.')[0]
 root_path = get_root_path()
 input_file = path.join(root_path, 'input')
 NETWORK_FILENAME = path.join(input_file, 'networks', "H_sapiens.net")
@@ -21,31 +26,23 @@ SOURCES_FILENAME = path.join(input_file, 'priors', "drug_targets.txt")
 TERMINALS_FILENAME = path.join(input_file, 'priors', "drug_expressions.txt")
 torch.set_default_dtype(torch.float32)
 random_state = np.random.RandomState(0)
+output_folder = path.join(root_path, 'output', script_name, get_time())
+makedirs(output_folder)
+
 n_folds = 3
-args = {
-    'data':
-        {'n_experiments': 5,
-         'train_test_split': 0.8},
-    'propagation':
-        {'alpha': 0.8,
-         'eps': 1e-6,
-         'n_iterations': 3},
-    'model':
-        {'feature_extractor_layers': [64, 32, 16],
-         'classifier_layers': [64, 32, 16],
-         'pulling_func': 'mean',
-         'exp_emb_size': 8},
-    'train':
-        {'intermediate_loss_weight': 0,
-         'train_val_test_split' : [0.66, 0.14, 0.2], #sum([train, val, test])=1
-         'val_ratio' : 0.14,
-         'test_ratio' : 0.2,
-         'train_batch_size': 16,
-         'test_batch_size': 32,
-         'n_epochs': 1000,
-         'eval_interval': 2,
-         'learning_rate': 1e-3,
-         'n_evals_no_improvement': 25}}
+n_experiments = 20
+
+cmd_args = [int(arg) for arg in sys.argv[1:]]
+if len(cmd_args) == 2:
+    n_experiments = cmd_args[1]
+    device = torch.device("cuda:{}".format(cmd_args[0]) if torch.cuda.is_available() else "cpu")
+
+if n_experiments <= 30:
+    args = experiments_20
+else:
+    args = experiments_50
+
+args['data']['n_experiments'] = n_experiments
 
 
 # data read and filtering
@@ -147,7 +144,7 @@ plt.ylim([0, 1])
 plt.xlabel('Recall')
 plt.ylabel('Precision')
 plt.legend(loc="lower right")
-plt.title('KPI Balanced with {} - sources, {} folds'.format(args['data']['n_experiments'], n_folds))
+plt.title('KPI Balanced, {} sources, {} folds'.format(args['data']['n_experiments'], n_folds))
 
 params = {'legend.fontsize': 8,
           'figure.figsize': (4.6, 2.9),
@@ -155,5 +152,9 @@ params = {'legend.fontsize': 8,
           'axes.titlesize': 8,
           'xtick.labelsize': 8,
           'ytick.labelsize': 8}
+
 plt.rcParams.update(params)
-plt.savefig('fig.png')
+plt.savefig(path.join(output_folder, 'auc_curve'))
+
+with open(path.join(output_folder, 'args'), 'w') as f:
+    json.dump(args, f, indent=4, separators=(',', ': '))
