@@ -8,6 +8,7 @@ from torch.optim import Adam
 from utils import read_data, generate_feature_columns, normalize_features, get_root_path, train_test_split
 import torch
 from sklearn.metrics import precision_recall_curve, auc
+import numpy as np
 
 root_path = get_root_path()
 input_file = path.join(root_path, 'input')
@@ -19,8 +20,9 @@ torch.set_default_dtype(torch.float64)
 
 args = {
     'data':
-        {'n_experiments': 20,
-         'train_test_split': 0.8},
+        {'n_experiments': 2,
+           'dataset_type': 'balanced_kpi',
+           'random_seed': 0},
     'propagation':
         {'alpha': 0.8,
          'eps': 1e-6,
@@ -32,18 +34,20 @@ args = {
          'exp_emb_size': 8},
     'train':
         {'intermediate_loss_weight': 0,
-         'train_val_test_split' : [0.66, 0.14, 0.2], # sum([train, val, test])=1
+         'train_val_test_split' : [0.7, 0.2, 0.1], # sum([train, val, test])=1
          'train_batch_size': 32,
          'test_batch_size': 32,
-         'n_epochs': 100,
+         'n_epochs': 15,
          'eval_interval': 5,
          'learning_rate': 1e-3,
-         'n_evals_no_improvement': 10}}
+         'max_evals_no_imp': 10}}
 
 
 # data read
+rng = np.random.RandomState(0)
+
 network, directed_interactions, sources, terminals =\
-    read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME)
+    read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME, rng)
 # merged_network = pandas.concat([directed_interactions, network.drop(directed_interactions.index & network.index)])
 directed_interactions_pairs_list = tuple(directed_interactions.index)
 pairs_to_index = {pair: p for p, pair in enumerate(network.index)}
@@ -57,25 +61,29 @@ indexes_to_keep = list(labeled_pairs_to_index.values())
 source_features, terminal_features = generate_feature_columns(network, sources, terminals, indexes_to_keep,
                                                               args['propagation']['alpha'], args['propagation']['n_iterations'],
                                                               args['propagation']['eps'], args['data']['n_experiments'])
-train_indexes, val_indexes, test_indexes = train_test_split(len(indexes_to_keep), args['train']['train_val_test_split'])
+
+train_indexes, val_indexes, test_indexes = train_test_split(len(indexes_to_keep), args['train']['train_val_test_split'],
+                                                            random_state=rng)
 
 
 #pro processing
 source_features, terminal_features = normalize_features(source_features, terminal_features)
 
-test_source_features = [x[test_indexes] for x in source_features]
-test_terminal_features = [x[test_indexes] for x in terminal_features]
-test_dataset = ClassifierDataset(test_source_features, test_terminal_features)
-test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True)
 train_source_features = [x[train_indexes] for x in source_features]
 train_terminal_features = [x[train_indexes] for x in terminal_features]
 train_dataset = ClassifierDataset(train_source_features, train_terminal_features)
 train_loader = DataLoader(train_dataset, batch_size=args['train']['train_batch_size'], shuffle=True, pin_memory=True)
+
+
 val_source_features = [x[val_indexes] for x in source_features]
 val_terminal_features = [x[val_indexes] for x in terminal_features]
 val_dataset = ClassifierDataset(val_source_features, val_terminal_features)
 val_loader = DataLoader(val_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True)
 
+test_source_features = [x[test_indexes] for x in source_features]
+test_terminal_features = [x[test_indexes] for x in terminal_features]
+test_dataset = ClassifierDataset(test_source_features, test_terminal_features)
+test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True)
 
 deep_prop_model = DeepProp(args['model']['feature_extractor_layers'], args['model']['pulling_func'],
                            args['model']['classifier_layers'], args['data']['n_experiments'],
@@ -90,11 +98,10 @@ trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyL
                             optimizer=optimizer, eval_metric=None, eval_interval=args['train']['eval_interval'], device='cpu')
 
 train_stats, best_model = trainer.train(train_loader=train_loader, eval_loader=val_loader, model=model,
-                                        max_evals_no_improvement=args['train']['n_evals_no_improvement'])
+                                        max_evals_no_improvement=args['train']['max_evals_no_imp'])
 deep_probs, deep_labels = trainer.eval(best_model, test_loader, in_train=False)
-deep_precision, deep_recall, deep_thresholds = precision_recall_curve(deep_labels, deep_probs)
+deep_precision, deep_recall, deep_thresholds = precision_recall_curve(deep_labels, deep_probs[:, 1])
 deep_auc = auc(deep_recall, deep_precision)
-
-print('Test AUC is {:.2f}'.format(deep_auc))
+print('Test PR-AUC: {:.2f}'.format(deep_auc))
 
 
