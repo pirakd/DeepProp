@@ -155,10 +155,11 @@ class ClassifierTrainer(Trainer):
             eval_loss += loss.item()
             epoch_classifier_loss += classifier_loss.item()
             hits += torch.sum(pred == labels_batch).item()
-            all_outs.append(out)
+            all_outs.append(out.cpu().detach().numpy())
             all_labels.append(labels_batch)
 
-        probs = torch.nn.functional.softmax(torch.squeeze(torch.cat(all_outs, 0)), dim=1).cpu().detach().numpy()
+        # probs = torch.nn.functional.softmax(torch.squeeze(torch.cat(all_outs, 0)), dim=1).cpu().detach().numpy()
+        probs = torch.nn.functional.softmax(torch.squeeze(Tensor(np.concatenate(all_outs, 0))), dim=1)
         all_labels = torch.squeeze(torch.cat(all_labels)).cpu().detach().numpy()
         precision, recall, thresholds = precision_recall_curve(all_labels, probs[:, 1])
         mean_auc = auc(recall, precision)

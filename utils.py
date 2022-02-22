@@ -191,8 +191,8 @@ def get_normalization_constants(pairs_indexes, source_indexes, terminal_indexes,
 
     source_std = np.sqrt(source_S/(total_source_elements-1))
     terminal_std = np.sqrt(terminal_S/(total_terminal_elements-1))
-    return source_mean, source_std, terminal_mean, terminal_std
-
+    return {'source_mean':source_mean, 'source_std':source_std,
+            'terminal_mean':terminal_mean, 'terminal_std':terminal_std}
 
 
 def train_test_split(n_samples, train_test_ratio, random_state:np.random.RandomState=None):
@@ -242,10 +242,12 @@ def log_results(results_dict, results_path):
         json.dump(results_dict, f, indent=4, separators=(',', ': '))
 
 
-def save_propagation_score(propagation_scores, row_id_to_idx, col_id_to_idx, propagation_args, data_args, file_name):
+def save_propagation_score(propagation_scores, normalization_constants,
+                           row_id_to_idx, col_id_to_idx, propagation_args, data_args, file_name):
     save_dir = path.join(get_root_path(), 'input', 'propagation_scores', file_name)
     save_dict = {'propagation_args': propagation_args, 'row_id_to_idx': row_id_to_idx, 'col_id_to_idx': col_id_to_idx,
-                 'propagation_scores': propagation_scores, 'data_args': data_args, 'data': get_time()}
+                 'propagation_scores': propagation_scores, 'normalization_constants': normalization_constants,
+                 'data_args': data_args, 'data': get_time()}
     save_pickle(save_dict, save_dir)
     return save_dir
 
