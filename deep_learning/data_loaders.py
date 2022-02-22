@@ -2,6 +2,7 @@ from torch.utils.data import Dataset
 import numpy as np
 import torch
 
+
 class ClassifierDataset(Dataset):
     def __init__(self, source_features, terminal_features):
         self.n_experiments = len(source_features)
@@ -54,3 +55,48 @@ class ClassifierDataset(Dataset):
         terminal_samples = np.array(terminal_samples)
 
         return {'source': source_samples, 'terminal': terminal_samples, 'labels': batch_labels}
+
+
+class LightDataset(Dataset):
+    def __init__(self, row_id_to_idx, col_id_to_idx, propagation_scores, directed_pairs_list, sources, terminals,
+                 normalization_constants):
+        self.row_id_to_idx = row_id_to_idx
+        self.col_id_to_idx = col_id_to_idx
+        self.propagation_scores = propagation_scores
+        self.source_indexes = self.get_experiment_indexes(sources)
+        self.terminal_indexes = self.get_experiment_indexes(terminals)
+        self.pairs_indexes = [(self.col_id_to_idx[pair[0]], self.col_id_to_idx[pair[1]]) for pair in directed_pairs_list]
+        self.longest_source = np.max([len(source) for source in sources.values()])
+        self.longest_terminal = np.max([len(terminal) for terminal in terminals.values()])
+        self.source_mean, self.source_std, self.terminal_mean, self.terminal_std = normalization_constants
+
+    def __len__(self):
+        return len(self.pairs_indexes) * 2
+
+    def __getitem__(self, idx):
+        if type(idx) == torch.Tensor:
+            idx = idx.item()
+        neg_flag = idx > len(self.pairs_indexes)
+        idx = np.mod(idx, len(self.pairs_indexes))
+        label = 0 if neg_flag else 1
+        pair = self.pairs_indexes[idx]
+        if neg_flag:
+            pair = (pair[1], pair[0])
+
+        source_sample = np.zeros((len(self.source_indexes), self.longest_source, 2))
+        terminal_sample = np.zeros((len(self.source_indexes), self.longest_terminal, 2))
+
+        for exp_idx in range(len(self.source_indexes)):
+            source_sample[exp_idx, :len(self.source_indexes[exp_idx]), :] =\
+                (self.propagation_scores[:, pair][self.source_indexes[exp_idx], :] - self.source_mean)/self.source_std
+            terminal_sample[exp_idx, :len(self.terminal_indexes[exp_idx]), :] =\
+                (self.propagation_scores[:, pair][self.terminal_indexes[exp_idx], :]- self.terminal_mean)/self.terminal_mean
+
+        return source_sample, terminal_sample, label
+
+    def get_experiment_indexes(self, experiment_id_sets):
+        experiment_indexes = []
+        for set in experiment_id_sets.values():
+            experiment_indexes.append([self.row_id_to_idx[id] for id in set])
+
+        return experiment_indexes

@@ -2,23 +2,27 @@ import numpy as np
 import networkx as nx
 import math
 import scipy
-from os import path, makedirs
+from os import path
 from datetime import datetime
+import pickle
 import json
 import pandas as pd
+import torch
+from deep_learning.deep_utils import FocalLoss
+from tqdm import tqdm
 
 
-def balance_dataset(network, directed_interactions):
+def balance_dataset(network, directed_interactions, rng):
     graph = nx.from_pandas_edgelist(network.reset_index(), 0, 1, 'edge_score')
     directed_interactions = directed_interactions[directed_interactions.index.get_level_values(0).isin(graph) & directed_interactions.index.get_level_values(1).isin(graph)]
     degree = dict(graph.degree(weight='edge_score'))
-    source_more_central = np.array([degree[s]>degree[t] for s, t in directed_interactions.index])
+    source_more_central = np.array([degree[s] > degree[t] for s, t in directed_interactions.index])
     larger_indexes = np.nonzero(source_more_central)[0]
     smaller_indexes = np.nonzero(1-source_more_central)[0]
     if larger_indexes.size > smaller_indexes.size:
-        larger_indexes = np.random.choice(larger_indexes, smaller_indexes.size, replace=False)
+        larger_indexes = rng.choice(larger_indexes, smaller_indexes.size, replace=False)
     else:
-        smaller_indexes = np.random.choice(smaller_indexes, larger_indexes.size, replace=False)
+        smaller_indexes = rng.choice(smaller_indexes, larger_indexes.size, replace=False)
     return directed_interactions.iloc[np.sort(np.hstack([smaller_indexes, larger_indexes]))]
 
 
@@ -53,7 +57,7 @@ def read_priors(sources_filename, terminals_filename):
     return source_priors, terminal_priors
 
 
-def read_data(network_filename, directed_interaction_filename, sources_filename, terminals_filename):
+def read_data(network_filename, directed_interaction_filename, sources_filename, terminals_filename, rng):
     from gene_name_translator.gene_translator import GeneTranslator
     translator = GeneTranslator(verbosity=False)
     translator.load_dictionary()
@@ -63,7 +67,7 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     merged_network =\
         pd.concat([network.drop(directed_interactions.index.intersection(network.index)), directed_interactions,])
 
-    directed_interactions = balance_dataset(merged_network, directed_interactions)
+    directed_interactions = balance_dataset(merged_network, directed_interactions, rng)
     sources, terminals = read_priors(sources_filename, terminals_filename)
     return merged_network, directed_interactions, sources, terminals
 
@@ -87,7 +91,6 @@ def propagate(seeds, matrix, gene_indexes, num_genes, propagate_alpha, propagate
 
         if math.sqrt(scipy.linalg.norm(F_t_1 - F_t)) < propagate_epsilon:
             break
-
     return F_t
 
 
@@ -125,6 +128,24 @@ def generate_feature_columns(network, sources, terminals, indexes_to_keep, propa
     return source_features, terminal_features
 
 
+def generate_raw_propagation_scores(network, sources, terminals, genes_ids_to_keep, propagate_alpha, propagate_iterations, propagation_epsilon):
+    all_source_terminal_genes = sorted(list(set.union(set.union(*sources.values()), set.union(*terminals.values()))))
+    gene_id_to_idx, matrix, num_genes = generate_propagate_data(network, propagate_alpha)
+    gene_idx_to_id = {xx:x for x,xx in gene_id_to_idx.items()}
+    genes_idxs_to_keep = [gene_id_to_idx[id] for id in genes_ids_to_keep]
+
+    propagation_scores = np.array([propagate([s], matrix, gene_id_to_idx, num_genes, propagate_alpha, propagate_iterations,
+                                        propagation_epsilon) for s in tqdm(all_source_terminal_genes,
+                                                                           desc='propagating scores',
+                                                                           total=len(all_source_terminal_genes))])
+
+    propagation_scores = propagation_scores[:, genes_idxs_to_keep]
+    col_id_to_idx = {gene_idx_to_id[idx]: i for i,idx in enumerate(genes_idxs_to_keep)}
+    row_id_to_idx = {id:i for i, id in enumerate(all_source_terminal_genes)}
+
+    return propagation_scores, row_id_to_idx, col_id_to_idx
+
+
 def normalize_features(source_features, terminal_features, eps=1e-8):
     source_array =[]
     terminal_array = []
@@ -141,12 +162,44 @@ def normalize_features(source_features, terminal_features, eps=1e-8):
     return source_features, terminal_features
 
 
+def get_normalization_constants(pairs_indexes, source_indexes, terminal_indexes, propagation_scores):
+    """
+    Acording to Welford's algorithm for calculating variance, See attached PDF for derivation.
+    """
+    total_source_elements, new_source_elements = 0, 0
+    total_terminal_elements, new_terminal_elements = 0, 0
+    terminal_mean, terminal_S = 0, 0
+    source_mean, source_S = 0, 0
+
+    for pair in pairs_indexes:
+        for exp_idx in range(len(source_indexes)):
+            source_feature = propagation_scores[:, pair][source_indexes[exp_idx], :].ravel()
+            terminal_feature = propagation_scores[:, pair][terminal_indexes[exp_idx], :].ravel()
+
+            new_source_elements, new_terminal_elements = len(source_feature), len(terminal_feature)
+            total_source_elements += new_source_elements
+            total_terminal_elements += new_terminal_elements
+
+            source_delta_mean = source_feature-source_mean
+            source_mean += np.sum(source_delta_mean) / total_source_elements
+            source_S += np.sum((source_feature - source_mean) * (source_delta_mean))
+
+            terminal_delta_mean = terminal_feature-terminal_mean
+            terminal_mean += np.sum(terminal_delta_mean) / total_terminal_elements
+            terminal_S += np.sum((terminal_feature - terminal_mean) * terminal_delta_mean)
+
+
+    source_std = np.sqrt(source_S/(total_source_elements-1))
+    terminal_std = np.sqrt(terminal_S/(total_terminal_elements-1))
+    return source_mean, source_std, terminal_mean, terminal_std
+
+
+
 def train_test_split(n_samples, train_test_ratio, random_state:np.random.RandomState=None):
     if random_state:
         split = random_state.choice([0, 1, 2], n_samples, replace=True, p=train_test_ratio )
     else:
         split = np.random.choice([0, 1, 2], n_samples, replace=True, p=train_test_ratio, )
-
     train_indexes = np.nonzero(split == 0)[0]
     val_indexes = np.nonzero(split == 1)[0]
     test_indexes = np.nonzero(split == 2)[0]
@@ -165,6 +218,15 @@ def get_pulling_func(pulling_func_name):
         assert 0, '{} is not a vallid pulling operation function name'.format(pulling_func_name)
 
 
+def get_loss_function(loss_name, **kwargs):
+    if loss_name == 'BCE':
+        return torch.nn.BCEWithLogitsLoss()
+    elif loss_name == 'FOCAL':
+        return FocalLoss(gamma=kwargs['focal_gamma'])
+    else:
+        assert 0, '{} is not a valid loss name'.format(loss_name)
+
+
 def get_root_path():
     return path.dirname(path.realpath(__file__))
 
@@ -179,3 +241,21 @@ def log_results(results_dict, results_path):
     with open(file_path, 'w') as f:
         json.dump(results_dict, f, indent=4, separators=(',', ': '))
 
+
+def save_propagation_score(propagation_scores, row_id_to_idx, col_id_to_idx, propagation_args, data_args, file_name):
+    save_dir = path.join(get_root_path(), 'input', 'propagation_scores', file_name)
+    save_dict = {'propagation_args': propagation_args, 'row_id_to_idx': row_id_to_idx, 'col_id_to_idx': col_id_to_idx,
+                 'propagation_scores': propagation_scores, 'data_args': data_args, 'data': get_time()}
+    save_pickle(save_dict, save_dir)
+    return save_dir
+
+
+def save_pickle(obj, save_dir):
+    with open(save_dir, 'wb') as f:
+        pickle.dump(obj, f)
+
+
+def load_pickle(load_dir):
+    with open(load_dir, 'rb') as f:
+        obj = pickle.load(f)
+    return obj
