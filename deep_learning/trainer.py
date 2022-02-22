@@ -5,7 +5,6 @@ from sklearn.metrics import precision_recall_curve
 from torch import Tensor
 import copy
 
-
 class Trainer():
     def __init__(self, n_epochs, criteria, optimizer, eval_metric,  eval_interval=1,  device='cpu', verbose=3, early_stop=None):
         self.n_epochs = n_epochs
@@ -78,8 +77,6 @@ class ClassifierTrainer(Trainer):
                     no_improvement_counter = 0
                     best_loss, best_auc, best_acc, best_epoch, best_precision, best_recall = avg_eval_loss, eval_auc, eval_acc, epoch, precision, recall
                     best_model = copy.deepcopy(model)
-
-
                 else:
                     no_improvement_counter += 1
 
@@ -96,7 +93,6 @@ class ClassifierTrainer(Trainer):
         epoch_intermediate_loss = 0
         epoch_classifier_loss = 0
         hits = 0
-        intermediate_loss = 0
         for source_batch, terminal_batch, labels_batch in train_loader:
             self.optimizer.zero_grad()
             if self.device != 'cpu':
@@ -109,7 +105,7 @@ class ClassifierTrainer(Trainer):
 
             classifier_loss = self.criteria(out, labels_batch)
             if self.intermediate_loss_weight:
-                intermediate_loss = self.intermediate_criteria(torch.squeeze(torch.sigmoid(pre_pred)),
+                intermediate_loss = self.intermediate_criteria(torch.squeeze(pre_pred),
                                         torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.get_default_dtype()))
                 epoch_intermediate_loss += intermediate_loss.item()
 
@@ -147,7 +143,7 @@ class ClassifierTrainer(Trainer):
 
             classifier_loss = self.criteria(out, labels_batch)
             if self.intermediate_loss_weight:
-                intermediate_loss = self.intermediate_criteria(torch.squeeze(torch.sigmoid(pre_pred)),
+                intermediate_loss = self.intermediate_criteria(torch.squeeze(pre_pred),
                                         torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.get_default_dtype()))
                 epoch_intermediate_eval_loss += intermediate_loss.item()
 
