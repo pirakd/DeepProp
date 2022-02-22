@@ -28,14 +28,15 @@ torch.set_default_dtype(torch.float32)
 random_state = np.random.RandomState(0)
 output_folder = path.join(root_path, 'output', script_name, get_time())
 makedirs(output_folder)
-
+device = 'cpu'
 n_folds = 3
-n_experiments = 20
+n_experiments = 50
 
 cmd_args = [int(arg) for arg in sys.argv[1:]]
 if len(cmd_args) == 2:
     n_experiments = cmd_args[1]
     device = torch.device("cuda:{}".format(cmd_args[0]) if torch.cuda.is_available() else "cpu")
+
 
 if n_experiments <= 30:
     args = experiments_20
@@ -103,7 +104,7 @@ for fold in range(n_folds):
     optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args['train']['learning_rate'])
     trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyLoss(), intermediate_criteria=nn.BCELoss(),
                                 intermediate_loss_weight=args['train']['intermediate_loss_weight'],
-                                optimizer=optimizer, eval_metric=None, eval_interval=args['train']['eval_interval'], device='cpu')
+                                optimizer=optimizer, eval_metric=None, eval_interval=args['train']['eval_interval'], device=device)
 
     train_stats, best_model = trainer.train(train_loader=train_loader, eval_loader=val_loader, model=model,
                                             max_evals_no_improvement=args['train']['n_evals_no_improvement'])
