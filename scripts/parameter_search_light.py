@@ -31,7 +31,7 @@ args = {
     'data':
         {'n_experiments': 2,
          'dataset_type': 'balanced_kpi',
-         'load_scores': False,
+         'load_scores': True,
          'scores_file_name': 'balanced_kpi_prop_scores',
          'random_seed': 0,
          'save_scores': False},
@@ -46,15 +46,15 @@ args = {
          'exp_emb_size': 8},
     'train':
         {'intermediate_loss_weight': 0,
-         'intermediate_loss_type' : 'BCE',
+         'intermediate_loss_type': 'BCE',
          'focal_gamma': 1,
          'train_val_test_split': [0.8, 0.2, 0],
          'test_batch_size': 32,
          'train_batch_size': 32,
          'n_epochs': 100,
-         'eval_interval': 10,
+         'eval_interval': 1,
          'learning_rate': 1e-3,
-         'max_evals_no_imp': 10 },}
+         'max_evals_no_imp': 10}}
 
 device = torch.device("cuda".format() if torch.cuda.is_available() else "cpu")
 cmd_args = [int(arg) for arg in sys.argv[1:]]
@@ -82,25 +82,29 @@ if args['data']['load_scores']:
     scores_dict = load_pickle(scores_file_path)
     propagation_scores = scores_dict['propagation_scores']
     row_id_to_idx, col_id_to_idx = scores_dict['row_id_to_idx'], scores_dict['col_id_to_idx']
+    normalization_constants_dict = scores_dict['normalization_constants']
+    sources_indexes = [[row_id_to_idx[id] for id in set] for set in sources.values()]
+    terminals_indexes = [[row_id_to_idx[id] for id in set] for set in terminals.values()]
+    pairs_indexes = [(col_id_to_idx[pair[0]], col_id_to_idx[pair[1]]) for pair in directed_interactions_pairs_list]
     assert scores_dict['data_args']['random_seed'] == args['data']['random_seed'], 'random seed of loaded data does not much current one'
 else:
     propagation_scores, row_id_to_idx, col_id_to_idx = generate_raw_propagation_scores(network, sources, terminals, genes_ids_to_keep,
                                                                   args['propagation']['alpha'], args['propagation']['n_iterations'],
                                                                   args['propagation']['eps'])
+    sources_indexes = [[row_id_to_idx[id] for id in set] for set in sources.values()]
+    terminals_indexes = [[row_id_to_idx[id] for id in set] for set in terminals.values()]
+    pairs_indexes = [(col_id_to_idx[pair[0]], col_id_to_idx[pair[1]]) for pair in directed_interactions_pairs_list]
+    normalization_constants_dict = get_normalization_constants(pairs_indexes, sources_indexes, terminals_indexes,
+                                                               propagation_scores)
     if args['data']['save_scores']:
-        save_propagation_score(propagation_scores, row_id_to_idx, col_id_to_idx, args['propagation'], args['data'],
-                               'balanced_kpi_prop_scores')
+        save_propagation_score(propagation_scores, normalization_constants_dict, row_id_to_idx, col_id_to_idx,
+                               args['propagation'], args['data'], 'balanced_kpi_prop_scores')
 
-sources_indexes = [[row_id_to_idx[id] for id in set] for set in sources.values()]
-terminals_indexes = [[row_id_to_idx[id] for id in set] for set in terminals.values()]
-pairs_indexes = [(col_id_to_idx[pair[0]], col_id_to_idx[pair[1]]) for pair in directed_interactions_pairs_list]
-normalization_constants = get_normalization_constants(pairs_indexes, sources_indexes, terminals_indexes, propagation_scores)
 
 train_indexes, val_indexes, test_indexes = train_test_split(len(directed_interactions_pairs_list), args['train']['train_val_test_split'],
                                                             random_state=rng)
-
-train_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[train_indexes], sources, terminals, normalization_constants)
-val_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[val_indexes], sources, terminals, normalization_constants)
+train_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[train_indexes], sources, terminals, normalization_constants_dict)
+val_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[val_indexes], sources, terminals, normalization_constants_dict)
 
 feature_extractor_layers = [[128,64], [64, 32, 16], [64,32], [16, 8]]
 classifier_layers = [[128, 64, 32], [128, 64], [32, 16, 8],  [32, 16], [64, 32, 16]]
@@ -125,7 +129,7 @@ while True:
 
     train_loader = DataLoader(train_dataset, batch_size=args['train']['train_batch_size'], shuffle=True,
                               pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True, )
 
     deep_prop_model = DeepProp(args['model']['feature_extractor_layers'], args['model']['pulling_func'],
                                args['model']['classifier_layers'], args['data']['n_experiments'],
