@@ -92,7 +92,7 @@ class LightDataset(Dataset):
             source_sample[exp_idx, :len(self.source_indexes[exp_idx]), :] =\
                 (self.propagation_scores[:, pair][self.source_indexes[exp_idx], :] - self.source_mean)/self.source_std
             terminal_sample[exp_idx, :len(self.terminal_indexes[exp_idx]), :] =\
-                (self.propagation_scores[:, pair][self.terminal_indexes[exp_idx], :]- self.terminal_mean)/self.terminal_mean
+                (self.propagation_scores[:, pair][self.terminal_indexes[exp_idx], :]- self.terminal_mean)/self.terminal_std
 
         return source_sample, terminal_sample, label
 
