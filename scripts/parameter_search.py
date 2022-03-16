@@ -65,7 +65,7 @@ if len(cmd_args) == 2:
 rng = np.random.RandomState(args['data']['random_seed'])
 network, directed_interactions, sources, terminals =\
     read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME,
-              rng)
+              args['data']['n_experiments'], args['data']['max_set_size'], rng)
 
 directed_interactions_pairs_list = tuple(directed_interactions.index)
 pairs_to_index = {pair: p for p, pair in enumerate(network.index)}
@@ -76,7 +76,7 @@ indexes_to_keep = list(labeled_pairs_to_index.values())
 # feature generation
 source_features, terminal_features = generate_feature_columns(network, sources, terminals, indexes_to_keep,
                                                               args['propagation']['alpha'], args['propagation']['n_iterations'],
-                                                              args['propagation']['eps'], args['data']['n_experiments'])
+                                                              args['propagation']['eps'])
 
 #pro processing
 source_features, terminal_features = normalize_features(source_features, terminal_features)

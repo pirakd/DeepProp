@@ -51,13 +51,23 @@ def read_directed_interactions(directed_interactions_filename, gene_translator):
     return directed_interactions[['edge_score']]
 
 
-def read_priors(sources_filename, terminals_filename):
-    source_priors = pd.read_table(sources_filename, header=None).groupby(0)[1].apply(set).to_dict()
-    terminal_priors = pd.read_table(terminals_filename, header=None).groupby(0)[1].apply(set).to_dict()
+def read_priors(sources_filename, terminals_filename, translator=None):
+    source_priors = pd.read_table(sources_filename, header=None).groupby(0)[1].apply(set)
+    terminal_priors = pd.read_table(terminals_filename, header=None).groupby(0)[1].apply(set)
+
+    if translator:
+        def translate(gene_set):
+            translated_genes = translator.translate(gene_set, 'entrez_id', 'entrez_id')
+            filtered_translated_genes = set([translated_genes[gene] for gene in gene_set if gene in translated_genes])
+            return filtered_translated_genes
+        source_priors = source_priors.apply(translate)
+        terminal_priors = terminal_priors.apply(translate)
+    source_priors = source_priors.to_dict()
+    terminal_priors = terminal_priors.to_dict()
     return source_priors, terminal_priors
 
 
-def read_data(network_filename, directed_interaction_filename, sources_filename, terminals_filename, rng):
+def read_data(network_filename, directed_interaction_filename, sources_filename, terminals_filename, n_exp, max_set_size, rng):
     from gene_name_translator.gene_translator import GeneTranslator
     translator = GeneTranslator(verbosity=False)
     translator.load_dictionary()
@@ -68,7 +78,27 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
         pd.concat([network.drop(directed_interactions.index.intersection(network.index)), directed_interactions,])
 
     directed_interactions = balance_dataset(merged_network, directed_interactions, rng)
-    sources, terminals = read_priors(sources_filename, terminals_filename)
+    sources, terminals = read_priors(sources_filename, terminals_filename, translator)
+
+    # constrain to network's genes
+    unique_genes = set((np.array(merged_network.index.to_list()).ravel()))
+    sources = {exp_name: set([gene for gene in genes if gene in unique_genes]) for exp_name, genes in sources.items()}
+    terminals = {exp_name: set([gene for gene in genes if gene in unique_genes]) for exp_name, genes in terminals.items()}
+
+    # filter large sets
+    sources = {exp_name: values for exp_name, values in sources.items() if len(values) <= max_set_size}
+    terminals = {exp_name: values for exp_name, values in terminals.items() if len(values) <= max_set_size}
+
+    if isinstance(n_exp, int):
+        filtered_experiments = sorted(sources.keys() & terminals.keys())[:n_exp]
+    elif n_exp == 'all':
+        pass
+    else:
+        assert 0, 'wrong input in args[data][n_experiments]'
+
+    sources = {exp_name: sources[exp_name] for exp_name in filtered_experiments}
+    terminals = {exp_name: terminals[exp_name] for exp_name in filtered_experiments}
+
     return merged_network, directed_interactions, sources, terminals
 
 
@@ -102,10 +132,10 @@ def generate_propagate_data(network, propagate_alpha):
     return gene_indexes, matrix, num_genes
 
 
-def generate_feature_columns(network, sources, terminals, indexes_to_keep, propagate_alpha, propagate_iterations, propagation_epsilon, n_exp):
+def generate_feature_columns(network, sources, terminals, indexes_to_keep, propagate_alpha, propagate_iterations, propagation_epsilon):
     gene_indexes, matrix, num_genes = generate_propagate_data(network, propagate_alpha)
     gene1_indexes, gene2_indexes = map(lambda x: x, zip(*[[(gene_indexes[gene]) for gene in pair] for pair in network.index]))
-    experiments = sorted(sources.keys() & terminals.keys())[:n_exp]
+    experiments = sources.keys()
 
     def generate_column(experiment):
         source_scores = np.array([propagate([s], matrix, gene_indexes, num_genes, propagate_alpha, propagate_iterations,

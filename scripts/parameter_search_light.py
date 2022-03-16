@@ -67,12 +67,8 @@ if len(cmd_args) == 2:
 rng = np.random.RandomState(args['data']['random_seed'])
 network, directed_interactions, sources, terminals =\
     read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME,
-              rng)
+              args['data']['n_experiments'], args['data']['max_set_size'], rng)
 
-# filter experiments
-experiments = set(sorted(list(sources.keys() & terminals.keys()))[:args['data']['n_experiments']])
-sources = {name: genes for name, genes in sources.items() if name in experiments}
-terminals = {name: genes for name, genes in terminals.items() if name in experiments}
 
 directed_interactions_pairs_list = np.array(directed_interactions.index)
 genes_ids_to_keep = sorted(list(set([x for pair in directed_interactions_pairs_list for x in pair])))

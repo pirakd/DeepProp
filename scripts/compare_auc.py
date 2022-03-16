@@ -25,12 +25,11 @@ DIRECTED_INTERACTIONS_FILENAME = path.join(input_file, 'directed_interactions', 
 SOURCES_FILENAME = path.join(input_file, 'priors', "drug_targets.txt")
 TERMINALS_FILENAME = path.join(input_file, 'priors', "drug_expressions.txt")
 torch.set_default_dtype(torch.float32)
-random_state = np.random.RandomState(0)
 output_folder = path.join(root_path, 'output', script_name, get_time())
 makedirs(output_folder)
 device = 'cpu'
 n_folds = 3
-n_experiments = 50
+n_experiments = 2
 
 cmd_args = [int(arg) for arg in sys.argv[1:]]
 if len(cmd_args) == 2:
@@ -45,10 +44,12 @@ else:
 
 args['data']['n_experiments'] = n_experiments
 
-
 # data read and filtering
+rng = np.random.RandomState(args['data']['random_seed'])
+
 network, directed_interactions, sources, terminals =\
-    read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME)
+    read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME,
+              args['data']['n_experiments'], args['data']['max_set_size'], rng)
 # merged_network = pandas.concat([directed_interactions, network.drop(directed_interactions.index & network.index)])
 directed_interactions_pairs_list = tuple(directed_interactions.index)
 pairs_to_index = {pair: p for p, pair in enumerate(network.index)}
@@ -58,11 +59,11 @@ indexes_to_keep = list(labeled_pairs_to_index.values())
 
 source_features, terminal_features = generate_feature_columns(network, sources, terminals, indexes_to_keep,
                                                               args['propagation']['alpha'], args['propagation']['n_iterations'],
-                                                              args['propagation']['eps'], args['data']['n_experiments'])
+                                                              args['propagation']['eps'])
 
 deep_probs_list, deep_labels_list, d2d_probs_list_2, d2d_labels_list_2, d2d_probs_list, d2d_labels_list = [],[],[],[],[],[]
 for fold in range(n_folds):
-    train_indexes, val_indexes, test_indexes = train_test_split(len(indexes_to_keep), args['train']['train_val_test_split'], random_state)
+    train_indexes, val_indexes, test_indexes = train_test_split(len(indexes_to_keep), args['train']['train_val_test_split'], rng)
     # feature generation
     d2d_train_indexes = np.concatenate([train_indexes, val_indexes])
 

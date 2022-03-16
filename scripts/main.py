@@ -16,17 +16,19 @@ NETWORK_FILENAME = path.join(input_file, 'networks', "H_sapiens.net")
 DIRECTED_INTERACTIONS_FILENAME = path.join(input_file, 'directed_interactions', "KPI_dataset")
 SOURCES_FILENAME = path.join(input_file, 'priors', "drug_targets.txt")
 TERMINALS_FILENAME = path.join(input_file, 'priors', "drug_expressions.txt")
+SOURCES_FILENAME = path.join(input_file, 'priors', "mutations_AML")
+TERMINALS_FILENAME = path.join(input_file, 'priors', "gene_expression_AML")
 torch.set_default_dtype(torch.float64)
 
 args = {
     'data':
-        {'n_experiments': 2,
-           'dataset_type': 'balanced_kpi',
-           'random_seed': 0},
+        {'n_experiments': 1,
+         'max_set_size': 400,
+         'random_seed': 0},
     'propagation':
         {'alpha': 0.8,
          'eps': 1e-6,
-         'n_iterations': 200},
+         'n_iterations': 10},
     'model':
         {'feature_extractor_layers': [64, 32, 16],
          'classifier_layers': [128,64],
@@ -34,9 +36,9 @@ args = {
          'exp_emb_size': 8},
     'train':
         {'intermediate_loss_weight': 0,
-         'train_val_test_split' : [0.7, 0.2, 0.1], # sum([train, val, test])=1
-         'train_batch_size': 32,
-         'test_batch_size': 32,
+         'train_val_test_split' : [0.7, 0.2, 0.1],  # sum([train, val, test])=1
+         'train_batch_size':1,
+         'test_batch_size': 1,
          'n_epochs': 15,
          'eval_interval': 5,
          'learning_rate': 1e-3,
@@ -44,10 +46,11 @@ args = {
 
 
 # data read
-rng = np.random.RandomState(0)
+rng = np.random.RandomState(args['data']['random_seed'])
 
 network, directed_interactions, sources, terminals =\
-    read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME, rng)
+    read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME,
+              args['data']['n_experiments'], args['data']['max_set_size'], rng)
 # merged_network = pandas.concat([directed_interactions, network.drop(directed_interactions.index & network.index)])
 directed_interactions_pairs_list = tuple(directed_interactions.index)
 pairs_to_index = {pair: p for p, pair in enumerate(network.index)}
@@ -60,7 +63,7 @@ indexes_to_keep = list(labeled_pairs_to_index.values())
 # feature generation
 source_features, terminal_features = generate_feature_columns(network, sources, terminals, indexes_to_keep,
                                                               args['propagation']['alpha'], args['propagation']['n_iterations'],
-                                                              args['propagation']['eps'], args['data']['n_experiments'])
+                                                              args['propagation']['eps'])
 
 train_indexes, val_indexes, test_indexes = train_test_split(len(indexes_to_keep), args['train']['train_val_test_split'],
                                                             random_state=rng)

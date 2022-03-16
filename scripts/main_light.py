@@ -24,15 +24,14 @@ NETWORK_FILENAME = path.join(input_file, 'networks', "H_sapiens.net")
 DIRECTED_INTERACTIONS_FILENAME = path.join(input_file, 'directed_interactions', "KPI_dataset")
 SOURCES_FILENAME = path.join(input_file, 'priors', "drug_targets.txt")
 TERMINALS_FILENAME = path.join(input_file, 'priors', "drug_expressions.txt")
-# torch.set_default_dtype(torch.float64)
 
 args = {
     'data':
-        {'n_experiments': 3,
+        {'n_experiments': 1,
+         'max_set_size': 400,
          'train_test_split': 0.8,
-         'dataset_type': 'balanced_kpi',
-         'load_scores': True,
-         'scores_file_name': 'balanced_kpi_prop_scores',
+         'load_scores': False,
+         'scores_file_name': 'balanced_kpi_prop_scores_551',
          'random_seed': 0,
          'save_scores': False},
     'propagation':
@@ -67,13 +66,10 @@ rng = np.random.RandomState(args['data']['random_seed'])
 # data read
 network, directed_interactions, sources, terminals =\
     read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME,
-              rng)
+              args['data']['n_experiments'], args['data']['max_set_size'], rng)
 
 # filter experiments
-experiments = set(sorted(list(sources.keys() & terminals.keys()))[:args['data']['n_experiments']])
-sources = {name: genes for name, genes in sources.items() if name in experiments}
-terminals = {name: genes for name, genes in terminals.items() if name in experiments}
-
+experiments = sources.keys()
 directed_interactions_pairs_list = np.array(directed_interactions.index)
 genes_ids_to_keep = sorted(list(set([x for pair in directed_interactions_pairs_list for x in pair])))
 
