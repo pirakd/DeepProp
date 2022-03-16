@@ -60,7 +60,7 @@ class ClassifierTrainer(Trainer):
                   .format(epoch, self.losses['train'][-1], epoch_classifier_loss/n_batches_per_epoch,
                           epoch_intermediate_loss/n_batches_per_epoch,  epoch_hits/n_samples_per_epoch))
 
-            if np.mod(epoch, self.eval_interval) == 0 and epoch:
+            if (np.mod(epoch, self.eval_interval) == 0 and epoch) or (epoch+1 == self.n_epochs):
                 eval_loss, eval_intermediate_loss, eval_classifier_loss, eval_hits, eval_auc, precision, recall = self.eval(model, eval_loader)
                 avg_eval_loss = eval_loss / n_test_batches_per_epoch
                 avg_eval_intermediate_loss = eval_intermediate_loss / n_test_batches_per_epoch
@@ -68,7 +68,7 @@ class ClassifierTrainer(Trainer):
                 eval_acc = eval_hits/len(eval_loader.dataset)
                 self.losses['validation'].append(avg_eval_loss)
                 self.metrics['validation'].append(eval_acc)
-                print('epoch {}, test_loss:{:.2e}, test_classifier_loss: {:.2e}, test_intermediate_loss: {:.2e}, test_acc: {:.2f}, test_auc: {:.2f}'
+                print('epoch {}, validation loss:{:.2e}, validation classifier loss: {:.2e}, validation intermediate loss: {:.2e}, validation acc: {:.2f}, validation auc: {:.2f}'
                       .format(epoch, avg_eval_loss, avg_eval_classfier_loss, avg_eval_intermediate_loss,
                               eval_acc, eval_auc))
 
