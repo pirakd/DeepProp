@@ -136,5 +136,8 @@ dmypy.json
 output/*
 */output/*
 
+#ignore data folder 
+input/*
+
 # for pycharm
 .idea/*
