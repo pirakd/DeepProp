@@ -16,14 +16,14 @@ NETWORK_FILENAME = path.join(input_file, 'networks', "H_sapiens.net")
 DIRECTED_INTERACTIONS_FILENAME = path.join(input_file, 'directed_interactions', "KPI_dataset")
 SOURCES_FILENAME = path.join(input_file, 'priors', "drug_targets.txt")
 TERMINALS_FILENAME = path.join(input_file, 'priors', "drug_expressions.txt")
-SOURCES_FILENAME = path.join(input_file, 'priors', "mutations_AML")
-TERMINALS_FILENAME = path.join(input_file, 'priors', "gene_expression_AML")
+SOURCES_FILENAME = path.join(input_file, 'priors', "mutations_breast")
+TERMINALS_FILENAME = path.join(input_file, 'priors', "gene_expression_breast")
 torch.set_default_dtype(torch.float64)
 
 args = {
     'data':
         {'n_experiments': 1,
-         'max_set_size': 1200,
+         'max_set_size': 500,
          'random_seed': 0},
     'propagation':
         {'alpha': 0.8,

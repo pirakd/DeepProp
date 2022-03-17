@@ -68,17 +68,26 @@ def read_priors(sources_filename, terminals_filename, translator=None):
 
 
 def read_data(network_filename, directed_interaction_filename, sources_filename, terminals_filename, n_exp, max_set_size, rng):
+    # set paths
+    root_path = get_root_path()
+    input_file = path.join(root_path, 'input')
+    network_file_path = path.join(input_file, 'networks', network_filename)
+    directed_interaction_file_path = path.join(input_file, 'directed_interactions', directed_interaction_filename)
+    sources_file_path = path.join(input_file, 'priors', sources_filename)
+    terminals_file_path = path.join(input_file, 'priors', terminals_filename)
+
+    # load gene translator
     from gene_name_translator.gene_translator import GeneTranslator
     translator = GeneTranslator(verbosity=False)
     translator.load_dictionary()
 
-    network = read_network(network_filename, translator)
-    directed_interactions = read_directed_interactions(directed_interaction_filename, translator)
+    # do all the reading stuff
+    network = read_network(network_file_path, translator)
+    directed_interactions = read_directed_interactions(directed_interaction_file_path, translator)
     merged_network =\
         pd.concat([network.drop(directed_interactions.index.intersection(network.index)), directed_interactions,])
-
     directed_interactions = balance_dataset(merged_network, directed_interactions, rng)
-    sources, terminals = read_priors(sources_filename, terminals_filename, translator)
+    sources, terminals = read_priors(sources_file_path, terminals_file_path, translator)
 
     # constrain to network's genes
     unique_genes = set((np.array(merged_network.index.to_list()).ravel()))
@@ -89,14 +98,16 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     sources = {exp_name: values for exp_name, values in sources.items() if len(values) <= max_set_size}
     terminals = {exp_name: values for exp_name, values in terminals.items() if len(values) <= max_set_size}
 
+    # filter experiments that do not have a source and a terminal set
     filtered_experiments = sorted(sources.keys() & terminals.keys())
+
+    # choose only a subset of the experiments
     if isinstance(n_exp, int):
         filtered_experiments = filtered_experiments[:n_exp]
     elif n_exp == 'all':
         pass
     else:
         assert 0, 'wrong input in args[data][n_experiments]'
-
     sources = {exp_name: sources[exp_name] for exp_name in filtered_experiments}
     terminals = {exp_name: terminals[exp_name] for exp_name in filtered_experiments}
 
@@ -274,8 +285,8 @@ def log_results(results_dict, results_path):
 
 
 def save_propagation_score(propagation_scores, normalization_constants,
-                           row_id_to_idx, col_id_to_idx, propagation_args, data_args, file_name):
-    save_dir = path.join(get_root_path(), 'input', 'propagation_scores', file_name)
+                           row_id_to_idx, col_id_to_idx, propagation_args, data_args, filename):
+    save_dir = path.join(get_root_path(), 'input', 'propagation_scores', filename)
     save_dict = {'propagation_args': propagation_args, 'row_id_to_idx': row_id_to_idx, 'col_id_to_idx': col_id_to_idx,
                  'propagation_scores': propagation_scores, 'normalization_constants': normalization_constants,
                  'data_args': data_args, 'data': get_time()}

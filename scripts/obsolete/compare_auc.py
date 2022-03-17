@@ -108,7 +108,7 @@ for fold in range(n_folds):
                                 optimizer=optimizer, eval_metric=None, eval_interval=args['train']['eval_interval'], device=device)
 
     train_stats, best_model = trainer.train(train_loader=train_loader, eval_loader=val_loader, model=model,
-                                            max_evals_no_improvement=args['train']['n_evals_no_improvement'])
+                                            max_evals_no_improvement=args['train']['max_evals_no_imp'])
 
     deep_probs, deep_labels = trainer.eval(best_model, test_loader, output_probs=True)
 

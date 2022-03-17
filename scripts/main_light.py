@@ -19,41 +19,40 @@ output_file_path = path.join(get_root_path(), output_folder)
 makedirs(output_file_path, exist_ok=True)
 
 root_path = get_root_path()
-input_file = path.join(root_path, 'input')
-NETWORK_FILENAME = path.join(input_file, 'networks', "H_sapiens.net")
-DIRECTED_INTERACTIONS_FILENAME = path.join(input_file, 'directed_interactions', "KPI_dataset")
-SOURCES_FILENAME = path.join(input_file, 'priors', "drug_targets.txt")
-TERMINALS_FILENAME = path.join(input_file, 'priors', "drug_expressions.txt")
+
 
 args = {
     'data':
-        {'n_experiments': 1,
+        {'n_experiments': 50,
          'max_set_size': 400,
-         'train_test_split': 0.8,
-         'load_scores': False,
-         'scores_file_name': 'balanced_kpi_prop_scores_551',
-         'random_seed': 0,
-         'save_scores': False},
+         'network_filename': 'H_sapiens.net',
+         'directed_interactions_filename': 'KPI_dataset',
+         'sources_filename': 'drug_targets.txt',
+         'terminals_filename': 'drug_expressions.txt',
+         'load_prop_scores': True,
+         'save_prop_scores': False,
+         'prop_scores_filename': 'balanced_kpi_prop_scores',
+         'random_seed': 0},
     'propagation':
         {'alpha': 0.8,
          'eps': 1e-6,
          'n_iterations': 200},
     'model':
-        {'feature_extractor_layers': [64, 32, 16],
+        {'feature_extractor_layers': [64, 32],
          'classifier_layers': [128, 64],
          'pulling_func': 'mean',
-         'exp_emb_size': 8},
+         'exp_emb_size': 12},
     'train':
-        {'intermediate_loss_weight': 0,
-         'intermediate_loss_type' : 'BCE',
+        {'intermediate_loss_weight': 0.5,
+         'intermediate_loss_type': 'BCE',
          'focal_gamma': 1,
-         'train_val_test_split': [0.66, 0.14, 0.2],
+         'train_val_test_split': [0.66, 0.14, 0.2], # sum([train, val, test])=1
+         'train_batch_size': 16,
          'test_batch_size': 32,
-         'train_batch_size': 32,
-         'n_epochs': 100,
-         'eval_interval': 10,
-         'learning_rate': 1e-3,
-         'max_evals_no_imp': 10 },}
+         'n_epochs':2000 ,
+         'eval_interval': 2,
+         'learning_rate': 5e-4,
+         'max_evals_no_imp': 25}}
 
 device = torch.device("cuda".format() if torch.cuda.is_available() else "cpu")
 cmd_args = [int(arg) for arg in sys.argv[1:]]
@@ -65,7 +64,8 @@ rng = np.random.RandomState(args['data']['random_seed'])
 
 # data read
 network, directed_interactions, sources, terminals =\
-    read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME,
+    read_data(args['data']['network_filename'], args['data']['directed_interactions_filename'],
+              args['data']['sources_filename'], args['data']['terminals_filename'],
               args['data']['n_experiments'], args['data']['max_set_size'], rng)
 
 # filter experiments
@@ -73,8 +73,8 @@ experiments = sources.keys()
 directed_interactions_pairs_list = np.array(directed_interactions.index)
 genes_ids_to_keep = sorted(list(set([x for pair in directed_interactions_pairs_list for x in pair])))
 
-if args['data']['load_scores']:
-    scores_file_path = path.join(root_path, 'input', 'propagation_scores', args['data']['scores_file_name'])
+if args['data']['load_prop_scores']:
+    scores_file_path = path.join(root_path, 'input', 'propagation_scores', args['data']['scores_filename'])
     scores_dict = load_pickle(scores_file_path)
     propagation_scores = scores_dict['propagation_scores']
     row_id_to_idx, col_id_to_idx = scores_dict['row_id_to_idx'], scores_dict['col_id_to_idx']
@@ -92,7 +92,7 @@ else:
     pairs_indexes = [(col_id_to_idx[pair[0]], col_id_to_idx[pair[1]]) for pair in directed_interactions_pairs_list]
     normalization_constants_dict = get_normalization_constants(pairs_indexes, sources_indexes, terminals_indexes,
                                                                propagation_scores)
-    if args['data']['save_scores']:
+    if args['data']['save_prop_scores']:
         save_propagation_score(propagation_scores, normalization_constants_dict, row_id_to_idx, col_id_to_idx,
                                args['propagation'], args['data'], 'balanced_kpi_prop_scores')
 
