@@ -89,8 +89,9 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     sources = {exp_name: values for exp_name, values in sources.items() if len(values) <= max_set_size}
     terminals = {exp_name: values for exp_name, values in terminals.items() if len(values) <= max_set_size}
 
+    filtered_experiments = sorted(sources.keys() & terminals.keys())
     if isinstance(n_exp, int):
-        filtered_experiments = sorted(sources.keys() & terminals.keys())[:n_exp]
+        filtered_experiments = filtered_experiments[:n_exp]
     elif n_exp == 'all':
         pass
     else:
