@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 from torch.optim import Adam
 from utils import read_data, generate_raw_propagation_scores, log_results, get_root_path, save_propagation_score,\
     load_pickle, train_test_split, get_normalization_constants, get_loss_function
+from sklearn.metrics import precision_recall_curve, auc
 import torch
 import numpy as np
 import random
@@ -48,7 +49,7 @@ args = {
         {'intermediate_loss_weight': 0,
          'intermediate_loss_type': 'BCE',
          'focal_gamma': 1,
-         'train_val_test_split': [0.8, 0.2, 0],
+         'train_val_test_split': [0.66, 0.14, 0.2],
          'test_batch_size': 32,
          'train_batch_size': 32,
          'n_epochs': 100,
@@ -101,6 +102,7 @@ train_indexes, val_indexes, test_indexes = train_test_split(len(directed_interac
                                                             random_state=rng)
 train_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[train_indexes], sources, terminals, normalization_constants_dict)
 val_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[val_indexes], sources, terminals, normalization_constants_dict)
+test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[test_indexes], sources, terminals, normalization_constants_dict)
 
 feature_extractor_layers = [[128,64], [64, 32, 16], [64,32], [16, 8]]
 classifier_layers = [[128, 64, 32], [128, 64], [32, 16, 8],  [32, 16], [64, 32, 16]]
@@ -110,6 +112,8 @@ train_batch_size = [16, 32, 64]
 exp_embedding_size = [4, 8, 12, 16]
 intermediate_loss_type_list = ['BCE', 'FOCAL']
 focal_gamma = [0.5, 1, 2, 3]
+val_loader = DataLoader(val_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True, )
+test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True, )
 
 while True:
     args['model']['feature_extractor_layers'] = random.choice(feature_extractor_layers)
@@ -125,7 +129,6 @@ while True:
 
     train_loader = DataLoader(train_dataset, batch_size=args['train']['train_batch_size'], shuffle=True,
                               pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True, )
 
     deep_prop_model = DeepProp(args['model']['feature_extractor_layers'], args['model']['pulling_func'],
                                args['model']['classifier_layers'], args['data']['n_experiments'],
@@ -143,6 +146,10 @@ while True:
     train_stats, best_model =\
         trainer.train(train_loader=train_loader, eval_loader=val_loader, model=model, max_evals_no_improvement=args['train']['max_evals_no_imp'])
 
+    avg_eval_loss, avg_eval_intermediate_loss, avg_eval_classifier_loss, eval_acc, mean_auc, precision, recall =\
+        trainer.eval(best_model, test_loader)
+
+    print('Test PR-AUC: {:.2f}'.format(mean_auc))
     results_dict = {'args': args, 'train_stats': train_stats}
 
     log_results(results_dict, output_file_path)

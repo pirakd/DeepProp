@@ -110,7 +110,7 @@ for fold in range(n_folds):
     train_stats, best_model = trainer.train(train_loader=train_loader, eval_loader=val_loader, model=model,
                                             max_evals_no_improvement=args['train']['n_evals_no_improvement'])
 
-    deep_probs, deep_labels = trainer.eval(best_model, test_loader, in_train=False)
+    deep_probs, deep_labels = trainer.eval(best_model, test_loader, output_probs=True)
 
     deep_probs_list.append(deep_probs[:, 1])
     deep_labels_list.append(deep_labels)

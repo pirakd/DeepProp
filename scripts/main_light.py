@@ -47,7 +47,7 @@ args = {
         {'intermediate_loss_weight': 0,
          'intermediate_loss_type' : 'BCE',
          'focal_gamma': 1,
-         'train_val_test_split': [0.8, 0.2, 0],
+         'train_val_test_split': [0.66, 0.14, 0.2],
          'test_batch_size': 32,
          'train_batch_size': 32,
          'n_epochs': 100,
@@ -103,6 +103,8 @@ train_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, d
 train_loader = DataLoader(train_dataset, batch_size=args['train']['train_batch_size'], shuffle=True, pin_memory=True)
 val_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[val_indexes], sources, terminals, normalization_constants_dict)
 val_loader = DataLoader(val_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True)
+test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[test_indexes], sources, terminals, normalization_constants_dict)
+test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True, )
 
 deep_prop_model = DeepProp(args['model']['feature_extractor_layers'], args['model']['pulling_func'],
                            args['model']['classifier_layers'], args['data']['n_experiments'],
@@ -115,3 +117,6 @@ trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyL
                             optimizer=optimizer, eval_metric=None, eval_interval=args['train']['eval_interval'], device='cpu')
 train_stats, best_model = trainer.train(train_loader=train_loader, eval_loader=val_loader, model=model,
                                         max_evals_no_improvement=args['train']['max_evals_no_imp'])
+avg_eval_loss, avg_eval_intermediate_loss, avg_eval_classifier_loss, eval_acc, mean_auc, precision, recall = \
+    trainer.eval(best_model, test_loader)
+print('Test PR-AUC: {:.2f}'.format(mean_auc))

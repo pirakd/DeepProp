@@ -23,12 +23,12 @@ torch.set_default_dtype(torch.float64)
 args = {
     'data':
         {'n_experiments': 1,
-         'max_set_size': 400,
+         'max_set_size': 1200,
          'random_seed': 0},
     'propagation':
         {'alpha': 0.8,
          'eps': 1e-6,
-         'n_iterations': 10},
+         'n_iterations': 100},
     'model':
         {'feature_extractor_layers': [64, 32, 16],
          'classifier_layers': [128,64],
@@ -102,9 +102,8 @@ trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyL
 
 train_stats, best_model = trainer.train(train_loader=train_loader, eval_loader=val_loader, model=model,
                                         max_evals_no_improvement=args['train']['max_evals_no_imp'])
-deep_probs, deep_labels = trainer.eval(best_model, test_loader, in_train=False)
-deep_precision, deep_recall, deep_thresholds = precision_recall_curve(deep_labels, deep_probs[:, 1])
-deep_auc = auc(deep_recall, deep_precision)
-print('Test PR-AUC: {:.2f}'.format(deep_auc))
+avg_eval_loss, avg_eval_intermediate_loss, avg_eval_classifier_loss, eval_acc, mean_auc, precision, recall = \
+    trainer.eval(best_model, test_loader)
+print('Test PR-AUC: {:.2f}'.format(mean_auc))
 
 

@@ -44,14 +44,13 @@ class ClassifierTrainer(Trainer):
         best_model = None
         self.losses = {'train': [], 'validation': []}
         self.metrics = {'train': [], 'validation': []}
-        best_loss, best_auc, best_acc, best_epoch, best_precision, best_recall = 0,0,0,0,0,0
+        best_loss, best_auc, best_acc, best_epoch = 0,0,0,0
         best_eval_loss = np.inf
         no_improvement_counter = 0
 
         n_batches_per_epoch = int(np.ceil(len(train_loader.dataset) / train_loader.batch_size))
         n_samples_per_epoch = len(train_loader.dataset)
 
-        n_test_batches_per_epoch = int(np.ceil(len(eval_loader.dataset) / eval_loader.batch_size))
         for epoch in range(self.n_epochs):
             epoch_loss, epoch_intermediate_loss, epoch_classifier_loss, epoch_hits = self.train_single_epoch(model, train_loader)
             self.losses['train'].append(epoch_loss/(n_batches_per_epoch))
@@ -61,21 +60,18 @@ class ClassifierTrainer(Trainer):
                           epoch_intermediate_loss/n_batches_per_epoch,  epoch_hits/n_samples_per_epoch))
 
             if (np.mod(epoch, self.eval_interval) == 0 and epoch) or (epoch+1 == self.n_epochs):
-                eval_loss, eval_intermediate_loss, eval_classifier_loss, eval_hits, eval_auc, precision, recall = self.eval(model, eval_loader)
-                avg_eval_loss = eval_loss / n_test_batches_per_epoch
-                avg_eval_intermediate_loss = eval_intermediate_loss / n_test_batches_per_epoch
-                avg_eval_classfier_loss = eval_classifier_loss / n_test_batches_per_epoch
-                eval_acc = eval_hits/len(eval_loader.dataset)
+                avg_eval_loss, avg_eval_intermediate_loss, avg_eval_classifier_loss, eval_acc, eval_auc, _, _ = self.eval(model, eval_loader)
+
                 self.losses['validation'].append(avg_eval_loss)
                 self.metrics['validation'].append(eval_acc)
                 print('epoch {}, validation loss:{:.2e}, validation classifier loss: {:.2e}, validation intermediate loss: {:.2e}, validation acc: {:.2f}, validation auc: {:.2f}'
-                      .format(epoch, avg_eval_loss, avg_eval_classfier_loss, avg_eval_intermediate_loss,
+                      .format(epoch, avg_eval_loss, avg_eval_classifier_loss, avg_eval_intermediate_loss,
                               eval_acc, eval_auc))
 
                 if best_auc < eval_auc:
                     best_eval_loss = avg_eval_loss
                     no_improvement_counter = 0
-                    best_loss, best_auc, best_acc, best_epoch, best_precision, best_recall = avg_eval_loss, eval_auc, eval_acc, epoch, precision, recall
+                    best_loss, best_auc, best_acc, best_epoch, _, _ = avg_eval_loss, eval_auc, eval_acc, epoch, _, _
                     best_model = copy.deepcopy(model)
                 else:
                     no_improvement_counter += 1
@@ -123,8 +119,8 @@ class ClassifierTrainer(Trainer):
 
         return epoch_loss, epoch_intermediate_loss, epoch_classifier_loss, hits
 
-
-    def eval(self, model, eval_loader, in_train=True):
+    def eval(self, model, eval_loader, output_probs= False):
+        n_test_batches_per_epoch = int(np.ceil(len(eval_loader.dataset) / eval_loader.batch_size))
         eval_loss = 0
         epoch_intermediate_eval_loss = 0
         epoch_classifier_loss = 0
@@ -161,9 +157,15 @@ class ClassifierTrainer(Trainer):
         # probs = torch.nn.functional.softmax(torch.squeeze(torch.cat(all_outs, 0)), dim=1).cpu().detach().numpy()
         probs = torch.nn.functional.softmax(torch.squeeze(Tensor(np.concatenate(all_outs, 0))), dim=1)
         all_labels = torch.squeeze(torch.cat(all_labels)).cpu().detach().numpy()
-        precision, recall, thresholds = precision_recall_curve(all_labels, probs[:, 1])
-        mean_auc = auc(recall, precision)
-        if in_train:
-            return eval_loss, epoch_intermediate_eval_loss, epoch_classifier_loss, hits, mean_auc, precision, recall
-        else:
+
+        if output_probs:
             return probs, all_labels
+        else:
+            precision, recall, thresholds = precision_recall_curve(all_labels, probs[:, 1])
+            mean_auc = auc(recall, precision)
+
+            avg_eval_loss = eval_loss / n_test_batches_per_epoch
+            avg_eval_intermediate_loss = epoch_intermediate_eval_loss / n_test_batches_per_epoch
+            avg_eval_classifier_loss = epoch_classifier_loss / n_test_batches_per_epoch
+            eval_acc = hits / len(eval_loader.dataset)
+            return avg_eval_loss, avg_eval_intermediate_loss, avg_eval_classifier_loss, eval_acc, mean_auc, precision, recall
