@@ -73,7 +73,7 @@ rng = np.random.RandomState(args['data']['random_seed'])
 network, directed_interactions, sources, terminals =\
     read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME,
               args['data']['n_experiments'], args['data']['max_set_size'], rng)
-
+n_experiments = len(sources)
 
 directed_interactions_pairs_list = np.array(directed_interactions.index)
 genes_ids_to_keep = sorted(list(set([x for pair in directed_interactions_pairs_list for x in pair])))
@@ -135,9 +135,9 @@ while True:
                               pin_memory=True)
 
     deep_prop_model = DeepProp(args['model']['feature_extractor_layers'], args['model']['pulling_func'],
-                               args['model']['classifier_layers'], args['data']['n_experiments'],
+                               args['model']['classifier_layers'], n_experiments,
                                args['model']['exp_emb_size'])
-    model = DeepPropClassifier(deep_prop_model, args['data']['n_experiments'])
+    model = DeepPropClassifier(deep_prop_model)
     model.to(device=device)
 
     optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args['train']['learning_rate'])
@@ -160,6 +160,6 @@ while True:
     test_stats = {'test_loss': test_loss, 'best_acc': test_intermediate_loss, 'best_auc': test_auc,
                    'test_intermediate_loss': test_intermediate_loss, 'test_classifier_loss':test_classifier_loss}
     print('Test PR-AUC: {:.2f}'.format(test_auc))
-    results_dict = {'args': args, 'train_stats': train_stats, 'test_stats':test_stats}
+    results_dict = {'args': args, 'train_stats': train_stats, 'test_stats': test_stats, 'n_experiments': n_experiments}
 
     log_results(results_dict, output_file_path)

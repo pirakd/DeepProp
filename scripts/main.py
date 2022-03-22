@@ -9,7 +9,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 from utils import read_data, generate_raw_propagation_scores,\
-    get_root_path, save_propagation_score, load_pickle, train_test_split, get_normalization_constants
+    get_root_path, save_propagation_score, load_pickle, train_test_split, get_normalization_constants, get_loss_function
 import torch
 import numpy as np
 
@@ -23,15 +23,15 @@ root_path = get_root_path()
 
 args = {
     'data':
-        {'n_experiments': 50,
-         'max_set_size': 400,
+        {'n_experiments': 10,
+         'max_set_size': 500,
          'network_filename': 'H_sapiens.net',
-         'directed_interactions_filename': 'KPI_dataset',
-         'sources_filename': 'drug_targets.txt',
-         'terminals_filename': 'drug_expressions.txt',
-         'load_prop_scores': True,
+         'directed_interactions_filename': 'STKE_dataset',
+         'sources_filename': 'targets_drug',
+         'terminals_filename': 'expressions_drug',
+         'load_prop_scores': False,
          'save_prop_scores': False,
-         'prop_scores_filename': 'balanced_kpi_prop_scores',
+         'prop_scores_filename': 'AML',
          'random_seed': 0},
     'propagation':
         {'alpha': 0.8,
@@ -39,18 +39,18 @@ args = {
          'n_iterations': 200},
     'model':
         {'feature_extractor_layers': [64, 32],
-         'classifier_layers': [128, 64],
+         'classifier_layers': [32, 16],
          'pulling_func': 'mean',
-         'exp_emb_size': 12},
+         'exp_emb_size': 4},
     'train':
-        {'intermediate_loss_weight': 0.5,
+        {'intermediate_loss_weight': 0.9,
          'intermediate_loss_type': 'BCE',
          'focal_gamma': 1,
-         'train_val_test_split': [0.66, 0.14, 0.2], # sum([train, val, test])=1
+         'train_val_test_split': [0.8, 0.1, 0.1], # sum([train, val, test])=1
          'train_batch_size': 16,
          'test_batch_size': 32,
          'n_epochs':2000 ,
-         'eval_interval': 2,
+         'eval_interval': 20,
          'learning_rate': 5e-4,
          'max_evals_no_imp': 25}}
 
@@ -68,13 +68,14 @@ network, directed_interactions, sources, terminals =\
               args['data']['sources_filename'], args['data']['terminals_filename'],
               args['data']['n_experiments'], args['data']['max_set_size'], rng)
 
+
 # filter experiments
-experiments = sources.keys()
+n_experiments = len(sources.keys())
 directed_interactions_pairs_list = np.array(directed_interactions.index)
 genes_ids_to_keep = sorted(list(set([x for pair in directed_interactions_pairs_list for x in pair])))
 
 if args['data']['load_prop_scores']:
-    scores_file_path = path.join(root_path, 'input', 'propagation_scores', args['data']['scores_filename'])
+    scores_file_path = path.join(root_path, 'input', 'propagation_scores', args['data']['prop_scores_filename'])
     scores_dict = load_pickle(scores_file_path)
     propagation_scores = scores_dict['propagation_scores']
     row_id_to_idx, col_id_to_idx = scores_dict['row_id_to_idx'], scores_dict['col_id_to_idx']
@@ -107,12 +108,14 @@ test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, di
 test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True, )
 
 deep_prop_model = DeepProp(args['model']['feature_extractor_layers'], args['model']['pulling_func'],
-                           args['model']['classifier_layers'], args['data']['n_experiments'],
+                           args['model']['classifier_layers'], n_experiments,
                            args['model']['exp_emb_size'])
 
-model = DeepPropClassifier(deep_prop_model, args['data']['n_experiments'])
+model = DeepPropClassifier(deep_prop_model)
 optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args['train']['learning_rate'])
-trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyLoss(), intermediate_criteria=nn.BCELoss(),
+intermediate_loss_type = get_loss_function(args['train']['intermediate_loss_type'],
+                                           focal_gamma=args['train']['focal_gamma'])
+trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyLoss(), intermediate_criteria=intermediate_loss_type,
                             intermediate_loss_weight=args['train']['intermediate_loss_weight'],
                             optimizer=optimizer, eval_metric=None, eval_interval=args['train']['eval_interval'], device='cpu')
 train_stats, best_model = trainer.train(train_loader=train_loader, eval_loader=val_loader, model=model,

@@ -10,7 +10,7 @@ class InvarianceModel(nn.Module):
 
 
     def forward(self, x):
-        mask = x[:,:,0] != 0
+        mask = x[:, :, 0] != 0
         x = self.feature_extractor(x)
         x = self.pulling_op(x, mask, dim=1)
         return x
@@ -72,9 +72,9 @@ class DeepProp(nn.Module):
 
 
 class DeepPropClassifier(nn.Module):
-    def __init__(self, deep_prop_model, n_experiments):
+    def __init__(self, deep_prop_model):
         super(DeepPropClassifier, self).__init__()
-        self.n_experiments = n_experiments
+        self.n_experiments = deep_prop_model.n_experiments
         self.base_model = deep_prop_model
         self.classifier = nn.Sequential(nn.Linear(self.n_experiments, 2))
 
@@ -87,3 +87,4 @@ class DeepPropClassifier(nn.Module):
         out = self.classifier(combined_2)
         pred = torch.argmax(out, dim=1)
         return out, pred, combined
+

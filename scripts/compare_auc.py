@@ -23,10 +23,10 @@ sources_filenmae_dict = {'drug': 'targets_drug',
                          'ovary': 'mutations_ovary',
                          'breast': 'mutations_breast'}
 terminals_filenmae_dict = {'drug': 'expressions_drug',
-                           'AML': 'gene_expressions_AML',
-                           'colon': 'gene_expressions_colon',
-                           'ovary': 'gene_expressions_ovary',
-                           'breast': 'gene_expressions_breast'}
+                           'AML': 'gene_expression_AML',
+                           'colon': 'gene_expression_colon',
+                           'ovary': 'gene_expression_ovary',
+                           'breast': 'gene_expression_breast'}
 
 script_name = path.basename(__file__).split('.')[0]
 root_path = get_root_path()
@@ -39,15 +39,17 @@ n_folds = 3
 n_experiments = 1
 input_name = 'drug'
 
-cmd_args = [int(arg) for arg in sys.argv[1:]]
-if len(cmd_args) == 2:
+cmd_args = [arg for arg in sys.argv[1:]]
+print(cmd_args)
+if len(cmd_args) == 3:
     input_name = cmd_args[0]
-    n_experiments = cmd_args[2]
-    device = torch.device("cuda:{}".format(cmd_args[1]) if torch.cuda.is_available() else "cpu")
+    n_experiments = cmd_args[2] if cmd_args[2] == 'all' else int(cmd_args[2])
+    device = torch.device("cuda:{}".format(int(cmd_args[1])) if torch.cuda.is_available() else "cpu")
+print('{} {} {}'.format(input_name, device, n_experiments))
 
 if n_experiments == 'all' or n_experiments >= 100:
-    arg = experiments_all
-if n_experiments <= 30:
+    args = experiments_all
+elif n_experiments <= 30:
     args = experiments_20
 else:
     args = experiments_50
@@ -55,6 +57,7 @@ else:
 args['data']['sources_filename'] = sources_filenmae_dict[input_name]
 args['data']['terminals_filename'] = terminals_filenmae_dict[input_name]
 args['data']['n_experiments'] = n_experiments
+args['data']['save_prop_scores'] = input_name
 
 
 # data read and filtering
@@ -64,6 +67,8 @@ network, directed_interactions, sources, terminals =\
     read_data(args['data']['network_filename'], args['data']['directed_interactions_filename'],
               args['data']['sources_filename'], args['data']['terminals_filename'],
               args['data']['n_experiments'], args['data']['max_set_size'], rng)
+n_experiments = len(sources)
+
 # merged_network = pandas.concat([directed_interactions, network.drop(directed_interactions.index & network.index)])
 directed_interactions_pairs_list = np.array(directed_interactions.index)
 genes_ids_to_keep = sorted(list(set([x for pair in directed_interactions_pairs_list for x in pair])))
@@ -124,9 +129,11 @@ for fold in range(n_folds):
 
     # build models
     deep_prop_model = DeepProp(args['model']['feature_extractor_layers'], args['model']['pulling_func'],
-                               args['model']['classifier_layers'], args['data']['n_experiments'],
+                               args['model']['classifier_layers'], n_experiments,
                                args['model']['exp_emb_size'])
-    model = DeepPropClassifier(deep_prop_model, args['data']['n_experiments'])
+    model = DeepPropClassifier(deep_prop_model)
+    model.to(device=device)
+
 
     # train
     intermediate_loss_type =  get_loss_function(args['train']['intermediate_loss_type'],
@@ -179,7 +186,7 @@ plt.ylabel('Precision')
 plt.legend(loc="lower right")
 plt.title('{}, {}, {} sources, {} folds'.format(args['data']['directed_interactions_filename'],
                                                 args['data']['sources_filename'].split('_')[-1],
-                                                args['data']['n_experiments'], n_folds))
+                                                n_experiments, n_folds))
 
 params = {'legend.fontsize': 8,
           'figure.figsize': (4.6, 2.9),
