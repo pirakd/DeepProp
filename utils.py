@@ -36,16 +36,22 @@ def read_network(network_filename, translator):
     return network
 
 def read_directed_interactions(directed_interactions_filename, gene_translator):
-    directed_interactions = pd.read_table(directed_interactions_filename, usecols=['GENE', 'SUB_GENE'])
-    genes = pd.unique(directed_interactions[['GENE', 'SUB_GENE']].values.ravel())
-    symbol_to_entrez = gene_translator.translate(genes, 'symbol', 'entrez_id')
-    has_translation = directed_interactions['GENE'].isin(symbol_to_entrez) & directed_interactions['SUB_GENE'].isin(symbol_to_entrez)
-    not_self_edge = directed_interactions['GENE'].ne(directed_interactions['SUB_GENE'])
+    directed_interactions = pd.read_table(directed_interactions_filename)
+
+    # remove self edges
+    not_self_edge = directed_interactions['from'].ne(directed_interactions['to'])
+    genes = pd.unique(directed_interactions[['from', 'to']].values.ravel())
+
+    if isinstance( directed_interactions['from'][0], str): # if genes in symbol format
+        translation_dict = gene_translator.translate(genes, 'symbol', 'entrez_id')
+    else: # if genes in entrez id format
+        translation_dict = gene_translator.translate(genes, 'entrez_id', 'entrez_id')
+
+    has_translation = directed_interactions['from'].isin(translation_dict) & directed_interactions['to'].isin(translation_dict)
     directed_interactions = directed_interactions[has_translation & not_self_edge]
-    directed_interactions.replace(symbol_to_entrez, inplace=True)
-    directed_interactions['edge_score'] = 0.8
-    directed_interactions.rename(columns={'GENE':'KIN_GENE'}, inplace=True)
-    directed_interactions.index = pd.MultiIndex.from_arrays(directed_interactions[['KIN_GENE', 'SUB_GENE']].values.T)
+    directed_interactions.replace(translation_dict, inplace=True)
+    directed_interactions['edge_score'] = 1
+    directed_interactions.index = pd.MultiIndex.from_arrays(directed_interactions[['from', 'to']].values.T)
     directed_interactions = directed_interactions[~directed_interactions.index.duplicated(keep='first')]
 
     return directed_interactions[['edge_score']]
@@ -107,7 +113,7 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     elif n_exp == 'all':
         pass
     else:
-        assert 0, 'wrong input in args[data][n_experiments]'
+        assert 0, 'Wrong input in args[data][n_experiments]'
     sources = {exp_name: sources[exp_name] for exp_name in filtered_experiments}
     terminals = {exp_name: terminals[exp_name] for exp_name in filtered_experiments}
 
@@ -303,3 +309,18 @@ def load_pickle(load_dir):
     with open(load_dir, 'rb') as f:
         obj = pickle.load(f)
     return obj
+
+def save_model(model, path):
+    torch.save(model.state_dict(), path)
+
+def load_model(args, path):
+    from deep_learning.models import DeepProp, DeepPropClassifier
+    state_dict = torch.load(path)
+    n_experiments = state_dict['classifier.0.weight'].shape[1]
+    deep_prop_model = DeepProp(args['model']['feature_extractor_layers'], args['model']['pulling_func'],
+                               args['model']['classifier_layers'], n_experiments,
+                               args['model']['exp_emb_size'])
+
+    model = DeepPropClassifier(deep_prop_model)
+    model.load_state_dict(state_dict)
+    return model
