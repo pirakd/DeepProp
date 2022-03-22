@@ -3,15 +3,15 @@ import sys
 sys.path.append(path.dirname(path.dirname(path.realpath(__file__))))
 from os import makedirs
 from deep_learning.data_loaders import LightDataset
-from deep_learning.models import DeepPropClassifier, DeepProp
 from deep_learning.trainer import ClassifierTrainer
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
-from utils import read_data, generate_raw_propagation_scores, log_results, save_model, get_time, \
+from utils import read_data, generate_raw_propagation_scores, load_model, log_results, get_time, \
     get_root_path, save_propagation_score, load_pickle, train_test_split, get_normalization_constants, get_loss_function
 import torch
 import numpy as np
+import json
 
 device = torch.device("cuda".format() if torch.cuda.is_available() else "cpu")
 output_folder = 'output'
@@ -19,48 +19,20 @@ output_file_path = path.join(get_root_path(), output_folder, path.basename(__fil
 makedirs(output_file_path, exist_ok=True)
 
 root_path = get_root_path()
-
-
-args = {
-    'data':
-        {'n_experiments': 2,
-         'max_set_size': 500,
-         'network_filename': 'H_sapiens.net',
-         'directed_interactions_filename': 'KPI_dataset',
-         'sources_filename': 'targets_drug',
-         'terminals_filename': 'expressions_drug',
-         'load_prop_scores': False,
-         'save_prop_scores': False,
-         'prop_scores_filename': 'AML',
-         'random_seed': 0},
-    'propagation':
-        {'alpha': 0.8,
-         'eps': 1e-6,
-         'n_iterations': 200},
-    'model':
-        {'feature_extractor_layers': [128, 64, 32],
-         'classifier_layers': [128, 64],
-         'pulling_func': 'mean',
-         'exp_emb_size': 4},
-    'train':
-        {'intermediate_loss_weight': 0,
-         'intermediate_loss_type': 'BCE',
-         'focal_gamma': 1,
-         'train_val_test_split': [0.9, 0.1, 0], # sum([train, val, test])=1
-         'train_batch_size': 16,
-         'test_batch_size': 32,
-         'n_epochs':7 ,
-         'eval_interval': 2,
-         'learning_rate': 5e-4,
-         'max_evals_no_imp': 25}}
-
+model_path = path.join(root_path, 'output', 'main' , '22_03_2022__17_08_36', 'model')
+model_args_path = path.join(root_path,'output', 'main', '22_03_2022__17_08_36', 'args')
+with open(model_args_path ,'r') as f:
+    args = json.load(f)
+train_dataset = args['data']['directed_interactions_filename']
+args['data']['directed_interactions_filename'] = 'STKE_dataset'
+args['train']['train_val_test_split'] = [0, 0, 1]
 device = torch.device("cuda".format() if torch.cuda.is_available() else "cpu")
 cmd_args = [int(arg) for arg in sys.argv[1:]]
-if len(cmd_args) == 2:
-    args['data']['n_experiments'] = cmd_args[1]
+if len(cmd_args) == 1:
     device = torch.device("cuda:{}".format(cmd_args[0]) if torch.cuda.is_available() else "cpu")
-    print('n_expriments: {}, device: {}'.format(args['data']['n_experiments'], device))
+
 rng = np.random.RandomState(args['data']['random_seed'])
+model = load_model(model_path, args).to(device)
 
 # data read
 network, directed_interactions, sources, terminals =\
@@ -99,36 +71,20 @@ else:
 
 train_indexes, val_indexes, test_indexes = train_test_split(len(directed_interactions_pairs_list), args['train']['train_val_test_split'],
                                                             random_state=rng)
-train_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[train_indexes], sources, terminals, normalization_constants_dict)
-train_loader = DataLoader(train_dataset, batch_size=args['train']['train_batch_size'], shuffle=True, pin_memory=True)
-val_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[val_indexes], sources, terminals, normalization_constants_dict)
-val_loader = DataLoader(val_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True)
 test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[test_indexes], sources, terminals, normalization_constants_dict)
 test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True, )
-
-deep_prop_model = DeepProp(args['model']['feature_extractor_layers'], args['model']['pulling_func'],
-                           args['model']['classifier_layers'], n_experiments,
-                           args['model']['exp_emb_size'])
-
-model = DeepPropClassifier(deep_prop_model)
 optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args['train']['learning_rate'])
-intermediate_loss_type = get_loss_function(args['train']['intermediate_loss_type'],
-                                           focal_gamma=args['train']['focal_gamma'])
-trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyLoss(), intermediate_criteria=intermediate_loss_type,
+trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyLoss(), intermediate_criteria=None,
                             intermediate_loss_weight=args['train']['intermediate_loss_weight'],
-                            optimizer=optimizer, eval_metric=None, eval_interval=args['train']['eval_interval'], device='cpu')
-train_stats, best_model = trainer.train(train_loader=train_loader, eval_loader=val_loader, model=model,
-                                        max_evals_no_improvement=args['train']['max_evals_no_imp'])
+                            optimizer=None, eval_metric=None, eval_interval=args['train']['eval_interval'], device='cpu')
 
-if len(test_dataset):
-    test_loss, test_intermediate_loss, test_classifier_loss, test_acc, test_auc, precision, recall = \
-        trainer.eval(best_model, test_loader)
-    test_stats = {'test_loss': test_loss, 'test_acc': test_acc, 'test_auc': test_auc,
-                  'test_intermediate_loss': test_intermediate_loss, 'test_classifier_loss': test_classifier_loss}
-    print('Test PR-AUC: {:.2f}'.format(test_auc))
-else:
-    test_stats = {}
+test_loss, test_intermediate_loss, test_classifier_loss, test_acc, test_auc, precision, recall = \
+    trainer.eval(model, test_loader)
+print('Test PR-AUC: {:.2f}'.format(test_auc))
+test_stats = {'test_loss': test_loss, 'best_acc': test_acc, 'best_auc': test_auc,
+              'test_intermediate_loss': test_intermediate_loss, 'test_classifier_loss': test_classifier_loss}
 
-results_dict = {'train_stats': train_stats, 'test_stats': test_stats, 'n_experiments': n_experiments}
-log_results(output_file_path,  args, results_dict, best_model)
 
+results_dict = {'test_stats': test_stats, 'n_experiments': n_experiments, 'train_dataset':train_dataset, 'test_dataset':args['data']['directed_interactions_filename'],
+              'model_path': model_path}
+log_results(output_file_path,  args, results_dict)

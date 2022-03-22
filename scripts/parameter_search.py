@@ -160,6 +160,5 @@ while True:
     test_stats = {'test_loss': test_loss, 'best_acc': test_intermediate_loss, 'best_auc': test_auc,
                    'test_intermediate_loss': test_intermediate_loss, 'test_classifier_loss':test_classifier_loss}
     print('Test PR-AUC: {:.2f}'.format(test_auc))
-    results_dict = {'args': args, 'train_stats': train_stats, 'test_stats': test_stats, 'n_experiments': n_experiments}
-
-    log_results(results_dict, output_file_path)
+    results_dict = {'train_stats': train_stats, 'test_stats': test_stats, 'n_experiments': n_experiments}
+    log_results(output_file_path, args, results_dict)

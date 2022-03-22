@@ -283,11 +283,13 @@ def get_time():
     return datetime.today().strftime('%d_%m_%Y__%H_%M_%S')
 
 
-def log_results(results_dict, results_path):
-    time = get_time()
-    file_path = path.join(results_path, time)
-    with open(file_path, 'w') as f:
+def log_results(output_path, args, results_dict, model=None):
+    with open(path.join(output_path, 'results'), 'w') as f:
         json.dump(results_dict, f, indent=4, separators=(',', ': '))
+    with open(path.join(output_path, 'args'), 'w') as f:
+        json.dump(args, f, indent=4, separators=(',', ': '))
+    if model:
+        save_model(path.join(output_path, 'model'), model)
 
 
 def save_propagation_score(propagation_scores, normalization_constants,
@@ -310,10 +312,12 @@ def load_pickle(load_dir):
         obj = pickle.load(f)
     return obj
 
-def save_model(model, path):
+
+def save_model(path, model):
     torch.save(model.state_dict(), path)
 
-def load_model(args, path):
+
+def load_model(path, args):
     from deep_learning.models import DeepProp, DeepPropClassifier
     state_dict = torch.load(path)
     n_experiments = state_dict['classifier.0.weight'].shape[1]

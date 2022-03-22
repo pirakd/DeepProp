@@ -29,4 +29,4 @@ class FocalLoss(nn.Module):
         if self.reduction == 'sum':
             return loss.sum()
         else:
-            assert 0, 'no such reduction for FocalLoss'
+            assert 0, 'No such reduction for FocalLoss'
