@@ -68,8 +68,10 @@ def read_priors(sources_filename, terminals_filename, translator=None):
             return filtered_translated_genes
         source_priors = source_priors.apply(translate)
         terminal_priors = terminal_priors.apply(translate)
-    source_priors = source_priors.to_dict()
-    terminal_priors = terminal_priors.to_dict()
+
+    # remove empty entreis
+    source_priors = source_priors[source_priors.apply(lambda x:len(x)>0) > 0].to_dict()
+    terminal_priors = terminal_priors[terminal_priors.apply(lambda x:len(x)>0) > 0].to_dict()
     return source_priors, terminal_priors
 
 
@@ -101,8 +103,8 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     terminals = {exp_name: set([gene for gene in genes if gene in unique_genes]) for exp_name, genes in terminals.items()}
 
     # filter large sets
-    sources = {exp_name: values for exp_name, values in sources.items() if len(values) <= max_set_size}
-    terminals = {exp_name: values for exp_name, values in terminals.items() if len(values) <= max_set_size}
+    sources = {exp_name: values for exp_name, values in sources.items() if (0 < len(values) <= max_set_size )}
+    terminals = {exp_name: values for exp_name, values in terminals.items() if (0 <len(values) <= max_set_size)}
 
     # filter experiments that do not have a source and a terminal set
     filtered_experiments = sorted(sources.keys() & terminals.keys())
@@ -317,9 +319,9 @@ def save_model(path, model):
     torch.save(model.state_dict(), path)
 
 
-def load_model(path, args):
+def load_model(path, args, device='cpu'):
     from deep_learning.models import DeepProp, DeepPropClassifier
-    state_dict = torch.load(path)
+    state_dict = torch.load(path, map_location=device)
     n_experiments = state_dict['classifier.0.weight'].shape[1]
     deep_prop_model = DeepProp(args['model']['feature_extractor_layers'], args['model']['pulling_func'],
                                args['model']['classifier_layers'], n_experiments,
