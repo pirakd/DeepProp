@@ -112,7 +112,7 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     # choose only a subset of the experiments
     if isinstance(n_exp, int):
         filtered_experiments = filtered_experiments[:n_exp]
-    elif n_exp == 'all':
+    elif n_exp == -1:
         pass
     else:
         assert 0, 'Wrong input in args[data][n_experiments]'
@@ -291,7 +291,7 @@ def log_results(output_path, args, results_dict, model=None):
     with open(path.join(output_path, 'args'), 'w') as f:
         json.dump(args, f, indent=4, separators=(',', ': '))
     if model:
-        save_model(path.join(output_path, 'model'), model)
+        save_model(path.join(output_path, 'models'), model)
 
 
 def save_propagation_score(propagation_scores, normalization_constants,
