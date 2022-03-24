@@ -19,7 +19,7 @@ def run(sys_args):
     output_file_path = path.join(get_root_path(), output_folder, path.basename(__file__).split('.')[0], get_time())
     makedirs(output_file_path, exist_ok=True)
     model_args_path = path.join(root_path, 'input', 'models', sys_args.model_name, 'args')
-    model_path = path.join(root_path, 'models', sys_args.model_name, 'model')
+    model_path = path.join(root_path, 'input', 'models', sys_args.model_name, 'model')
 
     with open(model_args_path, 'r') as f:
         args = json.load(f)
@@ -27,6 +27,7 @@ def run(sys_args):
     device = torch.device("cuda:{}".format(sys_args.device) if torch.cuda.is_available() else "cpu")
     train_dataset = args['data']['directed_interactions_filename']
     args['data']['load_prop_scores'] = sys_args.load_prop_scores
+    args['data']['n_experiments'] = 0
     args['data']['save_prop_scores'] = sys_args.save_prop_scores
     args['data']['prop_scores_filename'] = sys_args.prop_scores_filename
     args['train']['train_val_test_split'] = sys_args.train_val_test_split
@@ -88,20 +89,20 @@ def run(sys_args):
 
 
 if __name__ == '__main__':
-    model_name = 'ovary_all'
+    model_name = 'drug_all'
     load_prop = True
     save_prop = False
-    n_exp = -1
+    n_exp = 0
     split = [0, 0, 1]
     interaction_type = 'KPI'
     device = 'cpu'
-    prop_scores_filename = 'ovary_KPI'
+    prop_scores_filename = 'drug_KPI'
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-m,', '--model_name', type=str, help='name of saved model folder in input/models', default=model_name)
-    parser.add_argument('-s', '--save_prop', dest='save_prop_scores', type=bool, help='Whether to save propagation scores', default=save_prop)
-    parser.add_argument('-l', '--load_prop', dest='load_prop_scores', type=bool, help='Whether to load prop scores', default=load_prop)
-    parser.add_argument('-sp', '--split', dest='train_val_test_split', type=list, help='[train, val, test] sums to 1', default=split)
+    parser.add_argument('-s', '--save_prop', dest='save_prop_scores',  action='store_true', default=False, help='Whether to save propagation scores')
+    parser.add_argument('-l', '--load_prop', dest='load_prop_scores',  action='store_true', default=False, help='Whether to load prop scores')
+    parser.add_argument('-sp', '--split', dest='train_val_test_split',  nargs=3, help='[train, val, test] sums to 1', default=split, type=float)
     parser.add_argument('-d', '--device', type=str, help='cpu or gpu number',  default=device)
     parser.add_argument('-in', '--inter_file', dest='directed_interactions_filename', type=str, help='KPI/STKE',
                         default=interaction_type)
@@ -109,4 +110,5 @@ if __name__ == '__main__':
                         help='Name of prop score file(save/load)', default=prop_scores_filename)
 
     args = parser.parse_args()
+
     run(args)
