@@ -69,7 +69,7 @@ def run(sys_args):
                                                                    propagation_scores)
         if args['data']['save_prop_scores']:
             save_propagation_score(propagation_scores, normalization_constants_dict, row_id_to_idx, col_id_to_idx,
-                                   args['propagation'], args['data'], 'balanced_kpi_prop_scores')
+                                   args['propagation'], args['data'],  args['data']['prop_scores_filename'])
 
 
     train_indexes, val_indexes, test_indexes = train_test_split(len(directed_interactions_pairs_list), args['train']['train_val_test_split'],
@@ -81,9 +81,7 @@ def run(sys_args):
     test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[test_indexes], sources, terminals, normalization_constants_dict)
     test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True, )
 
-    deep_prop_model = DeepProp(args['model']['feature_extractor_layers'], args['model']['pulling_func'],
-                               args['model']['classifier_layers'], n_experiments,
-                               args['model']['exp_emb_size'])
+    deep_prop_model = DeepProp(args['model'], n_experiments)
 
     model = DeepPropClassifier(deep_prop_model).to(device)
     optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args['train']['learning_rate'])
@@ -109,14 +107,14 @@ def run(sys_args):
 
 
 if __name__ == '__main__':
-    input_type = 'ovary'
+    input_type = 'drug'
     load_prop = False
     save_prop = False
-    n_exp = 0
-    split = [0.7, 0.2, 0.1]
+    n_exp = 10
+    split = [0.9, 0.1, 0]
     interaction_type = 'STKE'
     device = 'cpu'
-    prop_scores_filename = 'ovary_STKE'
+    prop_scores_filename = 'drug_STKE'
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ex', '--ex_type', dest='experiments_type', type=str, help='name of experiment type(drug, colon, etc.)', default=input_type)
@@ -131,5 +129,6 @@ if __name__ == '__main__':
                         help='Name of prop score file(save/load)', default=prop_scores_filename)
 
     args = parser.parse_args()
-
+    args.load_prop_scores =  True
+    # args.save_prop_scores =  True
     run(args)

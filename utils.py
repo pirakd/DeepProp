@@ -110,10 +110,10 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     filtered_experiments = sorted(sources.keys() & terminals.keys())
 
     # choose only a subset of the experiments
-    if isinstance(n_exp, int):
-        filtered_experiments = filtered_experiments[:n_exp]
-    elif n_exp == -1:
+    if n_exp == 0:
         pass
+    elif isinstance(n_exp, int):
+        filtered_experiments = filtered_experiments[:n_exp]
     else:
         assert 0, 'Wrong input in args[data][n_experiments]'
     sources = {exp_name: sources[exp_name] for exp_name in filtered_experiments}
@@ -179,6 +179,7 @@ def generate_feature_columns(network, sources, terminals, indexes_to_keep, propa
 
 
 def generate_raw_propagation_scores(network, sources, terminals, genes_ids_to_keep, propagate_alpha, propagate_iterations, propagation_epsilon):
+    all_source_terminal_genes = sorted(list(set.union(set.union(*sources.values()), set.union(*terminals.values()))))
     all_source_terminal_genes = sorted(list(set.union(set.union(*sources.values()), set.union(*terminals.values()))))
     gene_id_to_idx, matrix, num_genes = generate_propagate_data(network, propagate_alpha)
     gene_idx_to_id = {xx:x for x,xx in gene_id_to_idx.items()}
@@ -323,9 +324,7 @@ def load_model(path, args, device='cpu'):
     from deep_learning.models import DeepProp, DeepPropClassifier
     state_dict = torch.load(path, map_location=device)
     n_experiments = state_dict['classifier.0.weight'].shape[1]
-    deep_prop_model = DeepProp(args['model']['feature_extractor_layers'], args['model']['pulling_func'],
-                               args['model']['classifier_layers'], n_experiments,
-                               args['model']['exp_emb_size'])
+    deep_prop_model = DeepProp(args['model'], n_experiments)
 
     model = DeepPropClassifier(deep_prop_model)
     model.load_state_dict(state_dict)

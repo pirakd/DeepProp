@@ -1,13 +1,12 @@
 import torch
 import torch.nn as nn
 from utils import get_pulling_func
-
+from copy import deepcopy
 class InvarianceModel(nn.Module):
-    def __init__(self, feature_extractor, pulling_op, drop_rate=None):
+    def __init__(self, feature_extractor, pulling_op):
         super(InvarianceModel, self).__init__()
-        self.feature_extractor = feature_extractor
+        self.feature_extractor = deepcopy(feature_extractor)
         self.pulling_op = get_pulling_func(pulling_op)
-
 
     def forward(self, x):
         mask = x[:, :, 0] != 0
@@ -17,45 +16,48 @@ class InvarianceModel(nn.Module):
 
 
 class DeepProp(nn.Module):
-    def __init__(self, feature_extractor_layers_size, pulling_op, classifier_layers_size, n_experiments=1, experiment_embedding_size=None):
+    def __init__(self, model_args, n_experiments=1):
         super(DeepProp, self).__init__()
         self.n_experiments = n_experiments
-        self.pulling_op = pulling_op
 
-        self.experiment_embedding_size = experiment_embedding_size
-        if experiment_embedding_size:
+        self.experiment_embedding_size = model_args['exp_emb_size']
+        if self.experiment_embedding_size:
             self.experiment_embedding = torch.nn.Embedding(self.n_experiments, self.experiment_embedding_size)
             self.register_buffer('experiment_vector', torch.arange(n_experiments,dtype=torch.long))
         else:
             self.experiment_embedding = None
 
-        feature_extractor = self.init_feature_extractor(feature_extractor_layers_size)
-        classifier = self.init_classifier(feature_extractor_layers_size[-1], classifier_layers_size)
-        self.source_model = InvarianceModel(feature_extractor, pulling_op)
-        self.terminal_model = InvarianceModel(feature_extractor, pulling_op)
+        feature_extractor = self.init_feature_extractor(model_args['feature_extractor_layers'])
+        classifier = self.init_classifier(model_args['feature_extractor_layers'][-1],
+                                          model_args['classifier_layers'],
+                                          model_args['classifier_dropout']
+                                          )
+        self.source_model = InvarianceModel(feature_extractor, model_args['pulling_func'])
+        self.terminal_model = InvarianceModel(feature_extractor, model_args['pulling_func'])
         self.classifier = classifier
 
-    def init_feature_extractor(self, f_layers_size):
+    def init_feature_extractor(self, f_layers_size, dropout_rate=0):
+        f_layers_size = [2] + f_layers_size
         feature_extractor_layers = []
-        feature_extractor_layers.append(nn.Linear(2, f_layers_size[0]))
-        feature_extractor_layers.append(nn.ReLU(inplace=True))
         for idx in range(len(f_layers_size))[:-1]:
             feature_extractor_layers.append(nn.Linear(f_layers_size[idx], f_layers_size[idx + 1]))
             feature_extractor_layers.append(nn.ReLU(inplace=True))
-        return nn.Sequential(*feature_extractor_layers[:-1])
+            if dropout_rate:
+                feature_extractor_layers.append(torch.nn.Dropout(dropout_rate))
+        return nn.Sequential(*feature_extractor_layers[:-2 if dropout_rate else -1])
 
-    def init_classifier(self, last_feature_dim, c_layers_size):
+    def init_classifier(self, last_feature_dim, c_layers_size, dropout_rate=None):
         classifier_layers = []
         if self.experiment_embedding_size:
-            classifier_layers.append(nn.Linear((2 * last_feature_dim) + self.experiment_embedding_size, c_layers_size[0]))
+            classifier_layers.append(
+                nn.Linear((2 * last_feature_dim) + self.experiment_embedding_size, c_layers_size[0]))
         else:
             classifier_layers.append(nn.Linear((2 * last_feature_dim), c_layers_size[0]))
-
-        classifier_layers.append(nn.ReLU(inplace=True))
         for idx in range(len(c_layers_size))[:-1]:
             classifier_layers.append(nn.Linear(c_layers_size[idx], c_layers_size[idx + 1]))
             classifier_layers.append(nn.ReLU(inplace=True))
-
+            if dropout_rate:
+                classifier_layers.append(torch.nn.Dropout(dropout_rate))
         classifier_layers.append(nn.Linear(c_layers_size[-1], 1))
         return nn.Sequential(*classifier_layers)
 

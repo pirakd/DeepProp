@@ -18,7 +18,10 @@ experiments_20 = {
         {'feature_extractor_layers': [64, 32, 16],
          'classifier_layers': [32, 16],
          'pulling_func': 'mean',
-         'exp_emb_size': 4},
+         'exp_emb_size': 4,
+         'feature_extractor_dropout': 0,
+         'classifier_dropout': 0
+         },
     'train':
         {'intermediate_loss_weight': 0.5,
          'intermediate_loss_type': 'BCE',
@@ -62,7 +65,10 @@ experiments_50 = {
          'n_epochs': 1000 ,
          'eval_interval': 2,
          'learning_rate': 5e-4,
-         'max_evals_no_imp': 25}}
+         'max_evals_no_imp': 25,
+         'feature_extractor_dropout': 0,
+         'classifier_dropout': 0
+         }}
 
 
 experiments_all = {
@@ -85,7 +91,10 @@ experiments_all = {
         {'feature_extractor_layers': [128, 64, 32],
          'classifier_layers': [128, 64],
          'pulling_func': 'mean',
-         'exp_emb_size': 20},
+         'exp_emb_size': 20,
+         'feature_extractor_dropout': 0,
+         'classifier_dropout': 0
+         },
     'train':
         {'intermediate_loss_weight': 0.75,
          'intermediate_loss_type': 'BCE',
@@ -96,4 +105,5 @@ experiments_all = {
          'n_epochs': 2000,
          'eval_interval': 3,
          'learning_rate': 5e-3,
-         'max_evals_no_imp': 25}}
+         'max_evals_no_imp': 25,
+         }}

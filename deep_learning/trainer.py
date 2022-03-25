@@ -77,7 +77,7 @@ class ClassifierTrainer(Trainer):
                     no_improvement_counter += 1
 
                 if no_improvement_counter == max_evals_no_improvement:
-                    print('early stopping on epoch {}'.format(epoch))
+                    print('early stopping on epoch {}, best epoch {}'.format(epoch, best_epoch))
                     break
 
         train_stats = {'best_val_loss':best_eval_loss, 'best_acc':best_acc, 'best_auc':best_auc,
@@ -89,8 +89,8 @@ class ClassifierTrainer(Trainer):
         epoch_intermediate_loss = 0
         epoch_classifier_loss = 0
         hits = 0
+        model.train()
         for source_batch, terminal_batch, labels_batch in train_loader:
-            self.optimizer.zero_grad()
             if self.device != 'cpu':
                 source_batch, terminal_batch, labels_batch =\
                     (x.to(self.device) for x in[source_batch, terminal_batch, labels_batch])
@@ -110,6 +110,7 @@ class ClassifierTrainer(Trainer):
             else:
                 loss = classifier_loss
 
+            self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
 
@@ -128,35 +129,37 @@ class ClassifierTrainer(Trainer):
 
         all_outs = []
         all_labels = []
-        for source_batch, terminal_batch, labels_batch in eval_loader:
-            if self.device != 'cpu':
-                source_batch, terminal_batch, labels_batch =\
-                    (x.to(self.device) for x in[source_batch, terminal_batch, labels_batch])
-            if torch.get_default_dtype() is torch.float32:
-                source_batch, terminal_batch, = source_batch.float(), terminal_batch.float()
+        model.eval()
+        with torch.no_grad():
+            for source_batch, terminal_batch, labels_batch in eval_loader:
+                if self.device != 'cpu':
+                    source_batch, terminal_batch, labels_batch =\
+                        (x.to(self.device) for x in[source_batch, terminal_batch, labels_batch])
+                if torch.get_default_dtype() is torch.float32:
+                    source_batch, terminal_batch, = source_batch.float(), terminal_batch.float()
 
-            out, pred, pre_pred = model(source_batch, terminal_batch)
+                out, pred, pre_pred = model(source_batch, terminal_batch)
 
-            classifier_loss = self.criteria(out, labels_batch)
-            if self.intermediate_loss_weight:
-                intermediate_loss = self.intermediate_criteria(torch.squeeze(pre_pred),
-                                        torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.get_default_dtype()))
-                epoch_intermediate_eval_loss += intermediate_loss.item()
+                classifier_loss = self.criteria(out, labels_batch)
+                if self.intermediate_loss_weight:
+                    intermediate_loss = self.intermediate_criteria(torch.squeeze(pre_pred),
+                                            torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.get_default_dtype()))
+                    epoch_intermediate_eval_loss += intermediate_loss.item()
 
-                loss = ((1-self.intermediate_loss_weight) * classifier_loss) +\
-                       (self.intermediate_loss_weight * intermediate_loss)
-            else:
-                loss = classifier_loss
+                    loss = ((1-self.intermediate_loss_weight) * classifier_loss) +\
+                           (self.intermediate_loss_weight * intermediate_loss)
+                else:
+                    loss = classifier_loss
 
-            eval_loss += loss.item()
-            epoch_classifier_loss += classifier_loss.item()
-            hits += torch.sum(pred == labels_batch).item()
-            all_outs.append(out.cpu().detach().numpy())
-            all_labels.append(labels_batch)
+                eval_loss += loss.item()
+                epoch_classifier_loss += classifier_loss.item()
+                hits += torch.sum(pred == labels_batch).item()
+                all_outs.append(out.cpu().detach().numpy())
+                all_labels.append(labels_batch)
 
-        # probs = torch.nn.functional.softmax(torch.squeeze(torch.cat(all_outs, 0)), dim=1).cpu().detach().numpy()
-        probs = torch.nn.functional.softmax(torch.squeeze(Tensor(np.concatenate(all_outs, 0))), dim=1)
-        all_labels = torch.squeeze(torch.cat(all_labels)).cpu().detach().numpy()
+            # probs = torch.nn.functional.softmax(torch.squeeze(torch.cat(all_outs, 0)), dim=1).cpu().detach().numpy()
+            probs = torch.nn.functional.softmax(torch.squeeze(Tensor(np.concatenate(all_outs, 0))), dim=1)
+            all_labels = torch.squeeze(torch.cat(all_labels)).cpu().detach().numpy()
 
         if output_probs:
             return probs, all_labels
