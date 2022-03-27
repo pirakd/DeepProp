@@ -213,37 +213,28 @@ def normalize_features(source_features, terminal_features, eps=1e-8):
     return source_features, terminal_features
 
 
-def get_normalization_constants(pairs_indexes, source_indexes, terminal_indexes, propagation_scores):
+def get_normalization_constants_2(pairs_indexes, source_indexes, terminal_indexes, propagation_scores):
     """
     Acording to Welford's algorithm for calculating variance, See attached PDF for derivation.
     """
-    total_source_elements, new_source_elements = 0, 0
-    total_terminal_elements, new_terminal_elements = 0, 0
-    terminal_mean, terminal_S = 0, 0
-    source_mean, source_S = 0, 0
+    total_elements = 0
+    total_mean, total_S = 0, 0
 
     for pair in pairs_indexes:
         for exp_idx in range(len(source_indexes)):
             source_feature = propagation_scores[:, pair][source_indexes[exp_idx], :].ravel()
             terminal_feature = propagation_scores[:, pair][terminal_indexes[exp_idx], :].ravel()
+            all_features = np.concatenate([source_feature,terminal_feature])
 
-            new_source_elements, new_terminal_elements = len(source_feature), len(terminal_feature)
-            total_source_elements += new_source_elements
-            total_terminal_elements += new_terminal_elements
+            num_new_elements =  len(all_features)
+            total_elements += num_new_elements
 
-            source_delta_mean = source_feature-source_mean
-            source_mean += np.sum(source_delta_mean) / total_source_elements
-            source_S += np.sum((source_feature - source_mean) * (source_delta_mean))
+            total_delta_mean = all_features - total_mean
+            total_mean += np.sum(total_delta_mean) / total_elements
+            total_S += np.sum((all_features - total_mean) * (total_delta_mean))
 
-            terminal_delta_mean = terminal_feature-terminal_mean
-            terminal_mean += np.sum(terminal_delta_mean) / total_terminal_elements
-            terminal_S += np.sum((terminal_feature - terminal_mean) * terminal_delta_mean)
-
-
-    source_std = np.sqrt(source_S/(total_source_elements-1))
-    terminal_std = np.sqrt(terminal_S/(total_terminal_elements-1))
-    return {'source_mean':source_mean, 'source_std':source_std,
-            'terminal_mean':terminal_mean, 'terminal_std':terminal_std}
+    total_std = np.sqrt(total_S/(total_elements-1))
+    return {'mean':total_mean, 'std':total_std}
 
 
 def train_test_split(n_samples, train_test_ratio, random_state:np.random.RandomState=None):

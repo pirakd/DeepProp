@@ -68,8 +68,7 @@ class LightDataset(Dataset):
         self.pairs_indexes = [(self.col_id_to_idx[pair[0]], self.col_id_to_idx[pair[1]]) for pair in directed_pairs_list]
         self.longest_source = np.max([len(source) for source in sources.values()])
         self.longest_terminal = np.max([len(terminal) for terminal in terminals.values()])
-        self.source_mean, self.source_std = normalization_constants['source_mean'], normalization_constants['source_std']
-        self.terminal_mean, self.terminal_std = normalization_constants['terminal_mean'], normalization_constants['terminal_std']
+        self.dataset_mean, self.dataset_std = normalization_constants['mean'], normalization_constants['std']
 
 
     def __len__(self):
@@ -90,9 +89,9 @@ class LightDataset(Dataset):
 
         for exp_idx in range(len(self.source_indexes)):
             source_sample[exp_idx, :len(self.source_indexes[exp_idx]), :] =\
-                (self.propagation_scores[:, pair][self.source_indexes[exp_idx], :] - self.source_mean)/self.source_std
+                (self.propagation_scores[:, pair][self.source_indexes[exp_idx], :] - self.dataset_mean)/self.dataset_std
             terminal_sample[exp_idx, :len(self.terminal_indexes[exp_idx]), :] =\
-                (self.propagation_scores[:, pair][self.terminal_indexes[exp_idx], :]- self.terminal_mean)/self.terminal_std
+                (self.propagation_scores[:, pair][self.terminal_indexes[exp_idx], :]- self.dataset_mean)/self.dataset_std
 
         return source_sample, terminal_sample, label
 
