@@ -10,7 +10,7 @@ experiments_20 = {
          'save_prop_scores': False,
          'prop_scores_filename': 'balanced_kpi_prop_scores',
          'random_seed': 0,
-         'normalization_method': 'Standard'}, # Standard, Power
+         'normalization_method': 'standard'}, # Standard, Power
     'propagation':
         {'alpha': 0.8,
          'eps': 1e-6,
@@ -47,7 +47,7 @@ experiments_50 = {
          'save_prop_scores': False,
          'prop_scores_filename': 'balanced_kpi_prop_scores',
          'random_seed': 0,
-         'normalization_method': 'Standard'
+         'normalization_method': 'standard'
          },
     'propagation':
         {'alpha': 0.8,
@@ -88,7 +88,7 @@ experiments_all = {
          'save_prop_scores': False,
          'prop_scores_filename': 'balanced_kpi_prop_scores',
          'random_seed': 0,
-         'normalization_method': 'Standard'
+         'normalization_method': 'standard'
          },
     'propagation':
         {'alpha': 0.8,

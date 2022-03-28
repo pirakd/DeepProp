@@ -11,19 +11,25 @@ import torch
 from deep_learning.deep_utils import FocalLoss
 from tqdm import tqdm
 
-
 def balance_dataset(network, directed_interactions, rng):
+    sources = directed_interactions['source'].unique()
     graph = nx.from_pandas_edgelist(network.reset_index(), 0, 1, 'edge_score')
     directed_interactions = directed_interactions[directed_interactions.index.get_level_values(0).isin(graph) & directed_interactions.index.get_level_values(1).isin(graph)]
     degree = dict(graph.degree(weight='edge_score'))
-    source_more_central = np.array([degree[s] > degree[t] for s, t in directed_interactions.index])
-    larger_indexes = np.nonzero(source_more_central)[0]
-    smaller_indexes = np.nonzero(1-source_more_central)[0]
-    if larger_indexes.size > smaller_indexes.size:
-        larger_indexes = rng.choice(larger_indexes, smaller_indexes.size, replace=False)
-    else:
-        smaller_indexes = rng.choice(smaller_indexes, larger_indexes.size, replace=False)
-    return directed_interactions.iloc[np.sort(np.hstack([smaller_indexes, larger_indexes]))]
+
+    balanced_interactions = pd.DataFrame()
+    for source in sources:
+        sliced_interactions = directed_interactions[directed_interactions['source'] == source]
+        source_more_central = np.array([degree[s] > degree[t] for s, t in sliced_interactions.index])
+        larger_indexes = np.nonzero(source_more_central)[0]
+        smaller_indexes = np.nonzero(1-source_more_central)[0]
+        if larger_indexes.size > smaller_indexes.size:
+            larger_indexes = rng.choice(larger_indexes, smaller_indexes.size, replace=False)
+        else:
+            smaller_indexes = rng.choice(smaller_indexes, larger_indexes.size, replace=False)
+        balanced_interactions = pd.concat([balanced_interactions, sliced_interactions.iloc[np.sort(np.hstack([smaller_indexes, larger_indexes]))]])
+
+    return balanced_interactions
 
 
 def read_network(network_filename, translator):
@@ -35,26 +41,34 @@ def read_network(network_filename, translator):
         network.rename(index=up_do_date_ids, inplace=True)
     return network
 
-def read_directed_interactions(directed_interactions_filename, gene_translator):
-    directed_interactions = pd.read_table(directed_interactions_filename)
+def read_directed_interactions(directed_interactions_folder, directed_interaction_filename, gene_translator):
+    if isinstance(directed_interaction_filename, str):
+        directed_interaction_filename = [directed_interaction_filename]
+    directed_interaction_filename = sorted(directed_interaction_filename)
+    all_interactions = pd.DataFrame()
+    for name in directed_interaction_filename:
+        directed_interactions = pd.read_table(path.join(directed_interactions_folder, name))
+        directed_interactions['source'] = name
+        # remove self edges
+        not_self_edge = directed_interactions['from'].ne(directed_interactions['to'])
+        genes = pd.unique(directed_interactions[['from', 'to']].values.ravel())
 
-    # remove self edges
-    not_self_edge = directed_interactions['from'].ne(directed_interactions['to'])
-    genes = pd.unique(directed_interactions[['from', 'to']].values.ravel())
+        if isinstance( directed_interactions['from'][0], str): # if genes in symbol format
+            translation_dict = gene_translator.translate(genes, 'symbol', 'entrez_id')
+        else: # if genes in entrez id format
+            translation_dict = gene_translator.translate(genes, 'entrez_id', 'entrez_id')
 
-    if isinstance( directed_interactions['from'][0], str): # if genes in symbol format
-        translation_dict = gene_translator.translate(genes, 'symbol', 'entrez_id')
-    else: # if genes in entrez id format
-        translation_dict = gene_translator.translate(genes, 'entrez_id', 'entrez_id')
+        has_translation = directed_interactions['from'].isin(translation_dict) & directed_interactions['to'].isin(translation_dict)
+        directed_interactions = directed_interactions[has_translation & not_self_edge]
+        directed_interactions.replace(translation_dict, inplace=True)
 
-    has_translation = directed_interactions['from'].isin(translation_dict) & directed_interactions['to'].isin(translation_dict)
-    directed_interactions = directed_interactions[has_translation & not_self_edge]
-    directed_interactions.replace(translation_dict, inplace=True)
-    directed_interactions['edge_score'] = 1
-    directed_interactions.index = pd.MultiIndex.from_arrays(directed_interactions[['from', 'to']].values.T)
-    directed_interactions = directed_interactions[~directed_interactions.index.duplicated(keep='first')]
+        all_interactions = pd.concat((all_interactions, directed_interactions))
 
-    return directed_interactions[['edge_score']]
+    all_interactions['edge_score'] = 1
+    all_interactions.index = pd.MultiIndex.from_arrays(all_interactions[['from', 'to']].values.T)
+    all_interactions = all_interactions[~all_interactions.index.duplicated(keep='first')]
+
+    return all_interactions[['source', 'edge_score']]
 
 
 def read_priors(sources_filename, terminals_filename, translator=None):
@@ -80,7 +94,7 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     root_path = get_root_path()
     input_file = path.join(root_path, 'input')
     network_file_path = path.join(input_file, 'networks', network_filename)
-    directed_interaction_file_path = path.join(input_file, 'directed_interactions', directed_interaction_filename)
+    directed_interaction_folder = path.join(input_file, 'directed_interactions')
     sources_file_path = path.join(input_file, 'priors', sources_filename)
     terminals_file_path = path.join(input_file, 'priors', terminals_filename)
 
@@ -91,7 +105,7 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
 
     # do all the reading stuff
     network = read_network(network_file_path, translator)
-    directed_interactions = read_directed_interactions(directed_interaction_file_path, translator)
+    directed_interactions = read_directed_interactions(directed_interaction_folder, directed_interaction_filename, translator)
     merged_network =\
         pd.concat([network.drop(directed_interactions.index.intersection(network.index)), directed_interactions,])
     directed_interactions = balance_dataset(merged_network, directed_interactions, rng)
