@@ -3,6 +3,7 @@ import numpy as np
 import torch
 
 from sklearn.preprocessing import  PowerTransformer
+
 class ClassifierDataset(Dataset):
     def __init__(self, source_features, terminal_features):
         self.n_experiments = len(source_features)
@@ -58,7 +59,8 @@ class ClassifierDataset(Dataset):
 
 
 class LightDataset(Dataset):
-    def __init__(self, row_id_to_idx, col_id_to_idx, propagation_scores, directed_pairs_list, sources, terminals, normalization_method, normalization_constants):
+    def __init__(self, row_id_to_idx, col_id_to_idx, propagation_scores, directed_pairs_list,
+                 sources, terminals, normalization_method, normalization_constants, pairs_source_type=None):
         self.row_id_to_idx = row_id_to_idx
         self.col_id_to_idx = col_id_to_idx
         self.propagation_scores = propagation_scores
@@ -69,7 +71,8 @@ class LightDataset(Dataset):
         self.longest_terminal = np.max([len(terminal) for terminal in terminals.values()])
         normalizer = self.get_normalization_method(normalization_method)
         self.normalizer = normalizer(normalization_constants)
-        a=1
+        self.pairs_source_type = pairs_source_type
+
     def __len__(self):
         return len(self.pairs_indexes) * 2
 
@@ -82,7 +85,7 @@ class LightDataset(Dataset):
         pair = self.pairs_indexes[idx]
         if neg_flag:
             pair = (pair[1], pair[0])
-
+        pair_source_type = self.pairs_source_type[idx] if self.pairs_source_type is not None else None
         source_sample = np.zeros((len(self.source_indexes), self.longest_source, 2))
         terminal_sample = np.zeros((len(self.source_indexes), self.longest_terminal, 2))
 
@@ -92,7 +95,7 @@ class LightDataset(Dataset):
             terminal_sample[exp_idx, :len(self.terminal_indexes[exp_idx]), :] =\
                 self.normalizer(self.propagation_scores[:, pair][self.terminal_indexes[exp_idx], :])
 
-        return source_sample, terminal_sample, label
+        return source_sample, terminal_sample, label, pair, pair_source_type
 
     def get_experiment_indexes(self, experiment_id_sets):
         experiment_indexes = []
@@ -117,9 +120,10 @@ class StandardNormalizer():
     def __call__(self, x, *args, **kwargs):
         return (x-self.dataset_mean) / self.dataset_std
 
-class PowerTransform():
+
+class PowerTransform:
     """
-    Yeo Johnoson trasnform
+    box-cox transform
     """
     def __init__(self, normalization_constants):
         self.lambda_const = normalization_constants['lambda']

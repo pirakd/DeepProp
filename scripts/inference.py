@@ -44,6 +44,7 @@ def run(sys_args):
 
     n_experiments = len(sources.keys())
     directed_interactions_pairs_list = np.array(directed_interactions.index)
+    directed_interactions_source_type = np.array(directed_interactions.source)
     genes_ids_to_keep = sorted(list(set([x for pair in directed_interactions_pairs_list for x in pair])))
 
     if args['data']['load_prop_scores']:
@@ -71,7 +72,7 @@ def run(sys_args):
                                                                 random_state=rng)
     test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores,
                                 directed_interactions_pairs_list[test_indexes], sources,
-                                terminals, args['data']['normalization_method'], normalization_constants_dict)
+                                terminals, args['data']['normalization_method'], normalization_constants_dict, directed_interactions_source_type[test_indexes])
     test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=False, )
     intermediate_loss_type = get_loss_function(args['train']['intermediate_loss_type'],
                                                focal_gamma=args['train']['focal_gamma'])

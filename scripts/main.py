@@ -50,6 +50,7 @@ def run(sys_args):
 
     n_experiments = len(sources.keys())
     directed_interactions_pairs_list = np.array(directed_interactions.index)
+    directed_interactions_source_type = np.array(directed_interactions.source)
     genes_ids_to_keep = sorted(list(set([x for pair in directed_interactions_pairs_list for x in pair])))
 
     if args['data']['load_prop_scores']:
@@ -76,14 +77,14 @@ def run(sys_args):
     train_indexes, val_indexes, test_indexes = train_test_split(len(directed_interactions_pairs_list), args['train']['train_val_test_split'],
                                                                 random_state=rng)
     train_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[train_indexes], sources, terminals, args['data']['normalization_method'],
-                                 normalization_constants_dict)
-    train_loader = DataLoader(train_dataset, batch_size=args['train']['train_batch_size'], shuffle=True, pin_memory=True)
+                                 normalization_constants_dict, directed_interactions_source_type[train_indexes])
+    train_loader = DataLoader(train_dataset, batch_size=args['train']['train_batch_size'], shuffle=True, pin_memory=False)
     val_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[val_indexes], sources, terminals, args['data']['normalization_method'],
-                               normalization_constants_dict)
-    val_loader = DataLoader(val_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True)
+                               normalization_constants_dict, directed_interactions_source_type[val_indexes])
+    val_loader = DataLoader(val_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=False)
     test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[test_indexes], sources, terminals, args['data']['normalization_method'],
-                                normalization_constants_dict)
-    test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True, )
+                                normalization_constants_dict, directed_interactions_source_type[test_indexes])
+    test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=False,)
 
     deep_prop_model = DeepProp(args['model'], n_experiments)
 
@@ -114,9 +115,9 @@ if __name__ == '__main__':
     input_type = 'drug'
     load_prop = False
     save_prop = False
-    n_exp = 10
-    split = [0.6, 0.2, 0.2]
-    interaction_type = 'STKE'
+    n_exp = 2
+    split = [0.66, 0.14, 0.2]
+    interaction_type = ['KPI']
     device = 'cpu'
     prop_scores_filename = 'drug_STKE'
 
@@ -133,6 +134,6 @@ if __name__ == '__main__':
                         help='Name of prop score file(save/load)', default=prop_scores_filename)
 
     args = parser.parse_args()
-    args.load_prop_scores =  True
+    # args.load_prop_scores =  True
     # args.save_prop_scores =  True
     run(args)

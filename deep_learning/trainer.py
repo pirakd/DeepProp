@@ -90,7 +90,7 @@ class ClassifierTrainer(Trainer):
         epoch_classifier_loss = 0
         hits = 0
         model.train()
-        for source_batch, terminal_batch, labels_batch in train_loader:
+        for source_batch, terminal_batch, labels_batch, pair_batch, pair_source_type in train_loader:
             if self.device != 'cpu':
                 source_batch, terminal_batch, labels_batch =\
                     (x.to(self.device) for x in[source_batch, terminal_batch, labels_batch])
@@ -131,7 +131,7 @@ class ClassifierTrainer(Trainer):
         all_labels = []
         model.eval()
         with torch.no_grad():
-            for eval_source_batch, eval_terminal_batch, eval_labels_batch in eval_loader:
+            for eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_batch, eval_pair_source_type_batch in eval_loader:
                 if self.device != 'cpu':
                     eval_source_batch, eval_terminal_batch, eval_labels_batch =\
                         (x.to(self.device) for x in[eval_source_batch, eval_terminal_batch, eval_labels_batch])
