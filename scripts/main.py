@@ -9,7 +9,8 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 from utils import read_data, generate_raw_propagation_scores, log_results, save_model, get_time, \
-    get_root_path, save_propagation_score, load_pickle, train_test_split, get_normalization_constants, get_loss_function
+    get_root_path, save_propagation_score, load_pickle, train_test_split, get_normalization_constants,\
+    get_loss_function
 import torch
 import numpy as np
 from presets import experiments_20, experiments_50, experiments_all
@@ -66,7 +67,7 @@ def run(sys_args):
         terminals_indexes = [[row_id_to_idx[id] for id in set] for set in terminals.values()]
         pairs_indexes = [(col_id_to_idx[pair[0]], col_id_to_idx[pair[1]]) for pair in directed_interactions_pairs_list]
         normalization_constants_dict = get_normalization_constants(pairs_indexes, sources_indexes, terminals_indexes,
-                                                                   propagation_scores)
+                                                                   propagation_scores, args['data']['normalization_method'])
         if args['data']['save_prop_scores']:
             save_propagation_score(propagation_scores, normalization_constants_dict, row_id_to_idx, col_id_to_idx,
                                    args['propagation'], args['data'],  args['data']['prop_scores_filename'])
@@ -74,11 +75,14 @@ def run(sys_args):
 
     train_indexes, val_indexes, test_indexes = train_test_split(len(directed_interactions_pairs_list), args['train']['train_val_test_split'],
                                                                 random_state=rng)
-    train_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[train_indexes], sources, terminals, normalization_constants_dict)
+    train_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[train_indexes], sources, terminals, args['data']['normalization_method'],
+                                 normalization_constants_dict)
     train_loader = DataLoader(train_dataset, batch_size=args['train']['train_batch_size'], shuffle=True, pin_memory=True)
-    val_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[val_indexes], sources, terminals, normalization_constants_dict)
+    val_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[val_indexes], sources, terminals, args['data']['normalization_method'],
+                               normalization_constants_dict)
     val_loader = DataLoader(val_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True)
-    test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[test_indexes], sources, terminals, normalization_constants_dict)
+    test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[test_indexes], sources, terminals, args['data']['normalization_method'],
+                                normalization_constants_dict)
     test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True, )
 
     deep_prop_model = DeepProp(args['model'], n_experiments)
@@ -111,7 +115,7 @@ if __name__ == '__main__':
     load_prop = False
     save_prop = False
     n_exp = 10
-    split = [0.9, 0.1, 0]
+    split = [0.6, 0.2, 0.2]
     interaction_type = 'STKE'
     device = 'cpu'
     prop_scores_filename = 'drug_STKE'

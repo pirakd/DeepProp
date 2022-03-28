@@ -2,7 +2,7 @@ from torch.utils.data import Dataset
 import numpy as np
 import torch
 
-
+from sklearn.preprocessing import  PowerTransformer
 class ClassifierDataset(Dataset):
     def __init__(self, source_features, terminal_features):
         self.n_experiments = len(source_features)
@@ -58,8 +58,7 @@ class ClassifierDataset(Dataset):
 
 
 class LightDataset(Dataset):
-    def __init__(self, row_id_to_idx, col_id_to_idx, propagation_scores, directed_pairs_list, sources, terminals,
-                 normalization_constants):
+    def __init__(self, row_id_to_idx, col_id_to_idx, propagation_scores, directed_pairs_list, sources, terminals, normalization_method, normalization_constants):
         self.row_id_to_idx = row_id_to_idx
         self.col_id_to_idx = col_id_to_idx
         self.propagation_scores = propagation_scores
@@ -68,9 +67,9 @@ class LightDataset(Dataset):
         self.pairs_indexes = [(self.col_id_to_idx[pair[0]], self.col_id_to_idx[pair[1]]) for pair in directed_pairs_list]
         self.longest_source = np.max([len(source) for source in sources.values()])
         self.longest_terminal = np.max([len(terminal) for terminal in terminals.values()])
-        self.dataset_mean, self.dataset_std = normalization_constants['mean'], normalization_constants['std']
-
-
+        normalizer = self.get_normalization_method(normalization_method)
+        self.normalizer = normalizer(normalization_constants)
+        a=1
     def __len__(self):
         return len(self.pairs_indexes) * 2
 
@@ -89,9 +88,9 @@ class LightDataset(Dataset):
 
         for exp_idx in range(len(self.source_indexes)):
             source_sample[exp_idx, :len(self.source_indexes[exp_idx]), :] =\
-                (self.propagation_scores[:, pair][self.source_indexes[exp_idx], :] - self.dataset_mean)/self.dataset_std
+                self.normalizer(self.propagation_scores[:, pair][self.source_indexes[exp_idx], :])
             terminal_sample[exp_idx, :len(self.terminal_indexes[exp_idx]), :] =\
-                (self.propagation_scores[:, pair][self.terminal_indexes[exp_idx], :]- self.dataset_mean)/self.dataset_std
+                self.normalizer(self.propagation_scores[:, pair][self.terminal_indexes[exp_idx], :])
 
         return source_sample, terminal_sample, label
 
@@ -101,3 +100,30 @@ class LightDataset(Dataset):
             experiment_indexes.append([self.row_id_to_idx[id] for id in set])
 
         return experiment_indexes
+
+    @staticmethod
+    def get_normalization_method(normalization_method):
+        if normalization_method == 'standard':
+            return StandardNormalizer
+        elif normalization_method == 'power':
+            return PowerTransform
+        else:
+            assert 0, '{} is not a valid normalization method name'.format(normalization_method)
+
+class StandardNormalizer():
+    def __init__(self, normalization_constants):
+        self.dataset_mean = normalization_constants['mean']
+        self.dataset_std = normalization_constants['std']
+    def __call__(self, x, *args, **kwargs):
+        return (x-self.dataset_mean) / self.dataset_std
+
+class PowerTransform():
+    """
+    Yeo Johnoson trasnform
+    """
+    def __init__(self, normalization_constants):
+        self.lambda_const = normalization_constants['lambda']
+        self.mean = normalization_constants['mean']
+        self.std = normalization_constants['std']
+    def __call__(self, x, *args, **kwargs):
+        return (((x**self.lambda_const - 1)/self.lambda_const) - self.mean) / self.std

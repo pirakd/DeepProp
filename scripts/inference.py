@@ -61,7 +61,7 @@ def run(sys_args):
         terminals_indexes = [[row_id_to_idx[id] for id in set] for set in terminals.values()]
         pairs_indexes = [(col_id_to_idx[pair[0]], col_id_to_idx[pair[1]]) for pair in directed_interactions_pairs_list]
         normalization_constants_dict = get_normalization_constants(pairs_indexes, sources_indexes, terminals_indexes,
-                                                                   propagation_scores)
+                                                                   propagation_scores, args['data']['normalization_method'])
         if args['data']['save_prop_scores']:
             save_propagation_score(propagation_scores, normalization_constants_dict, row_id_to_idx, col_id_to_idx,
                                    args['propagation'], args['data'], 'balanced_kpi_prop_scores')
@@ -69,8 +69,10 @@ def run(sys_args):
 
     train_indexes, val_indexes, test_indexes = train_test_split(len(directed_interactions_pairs_list), args['train']['train_val_test_split'],
                                                                 random_state=rng)
-    test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[test_indexes], sources, terminals, normalization_constants_dict)
-    test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=True, )
+    test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores,
+                                directed_interactions_pairs_list[test_indexes], sources,
+                                terminals, args['data']['normalization_method'], normalization_constants_dict)
+    test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=False, )
     intermediate_loss_type = get_loss_function(args['train']['intermediate_loss_type'],
                                                focal_gamma=args['train']['focal_gamma'])
     trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyLoss(), intermediate_criteria=intermediate_loss_type,

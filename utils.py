@@ -212,8 +212,7 @@ def normalize_features(source_features, terminal_features, eps=1e-8):
 
     return source_features, terminal_features
 
-
-def get_normalization_constants_2(pairs_indexes, source_indexes, terminal_indexes, propagation_scores):
+def get_dataset_mean_std(pairs_indexes, source_indexes, terminal_indexes, propagation_scores):
     """
     Acording to Welford's algorithm for calculating variance, See attached PDF for derivation.
     """
@@ -235,6 +234,42 @@ def get_normalization_constants_2(pairs_indexes, source_indexes, terminal_indexe
 
     total_std = np.sqrt(total_S/(total_elements-1))
     return {'mean':total_mean, 'std':total_std}
+
+def get_power_transform_lambda(pairs_indexes, source_indexes, terminal_indexes, propagation_scores):
+    from sklearn.preprocessing import PowerTransformer
+    min_num_examples = 1000000
+    min_example_ratio = 0.2
+    total_examples = len(pairs_indexes) * len(source_indexes)
+    ratio = min_num_examples/total_examples
+    if ratio < min_example_ratio:
+        p_sample = 0.2
+    elif ratio >= 1:
+        p_sample = 1
+    else: # 0.2 < ratio < 1:
+        p_sample = ratio
+
+    sampled_elements = []
+    for pair in pairs_indexes:
+        for exp_idx in range(len(source_indexes)):
+            if np.random.binomial(1, p_sample, 1)[0]:
+                sampled_elements.append(propagation_scores[:, pair][source_indexes[exp_idx], :].ravel().tolist())
+                sampled_elements.append(propagation_scores[:, pair][terminal_indexes[exp_idx], :].ravel().tolist())
+
+    sampled_elements = np.array([x for xx in sampled_elements for x in xx])
+    pt = PowerTransformer(method='box-cox', standardize=False)
+    transformed = pt.fit_transform(sampled_elements[:, np.newaxis])
+    mean = np.mean(transformed)
+    std = np.std(transformed)
+    return {'lambda':pt.lambdas_, 'mean':mean, 'std':std}
+
+def get_normalization_constants(pairs_indexes, source_indexes, terminal_indexes, propagation_scores, normalization_method):
+    if normalization_method == 'standard':
+        return get_dataset_mean_std(pairs_indexes, source_indexes, terminal_indexes, propagation_scores)
+    elif normalization_method == 'power':
+        return get_power_transform_lambda(pairs_indexes, source_indexes, terminal_indexes, propagation_scores)
+    else:
+        assert 0, '{} is not a valid normalization method name'.format(normalization_method)
+
 
 
 def train_test_split(n_samples, train_test_ratio, random_state:np.random.RandomState=None):

@@ -9,7 +9,8 @@ experiments_20 = {
          'load_prop_scores': False,
          'save_prop_scores': False,
          'prop_scores_filename': 'balanced_kpi_prop_scores',
-         'random_seed': 0},
+         'random_seed': 0,
+         'normalization_method': 'Standard'}, # Standard, Power
     'propagation':
         {'alpha': 0.8,
          'eps': 1e-6,
@@ -45,7 +46,9 @@ experiments_50 = {
          'load_prop_scores': True,
          'save_prop_scores': False,
          'prop_scores_filename': 'balanced_kpi_prop_scores',
-         'random_seed': 0},
+         'random_seed': 0,
+         'normalization_method': 'Standard'
+         },
     'propagation':
         {'alpha': 0.8,
          'eps': 1e-6,
@@ -54,7 +57,10 @@ experiments_50 = {
         {'feature_extractor_layers': [64, 32],
          'classifier_layers': [128, 64],
          'pulling_func': 'mean',
-         'exp_emb_size': 12},
+         'exp_emb_size': 12,
+         'feature_extractor_dropout': 0,
+         'classifier_dropout': 0
+         },
     'train':
         {'intermediate_loss_weight': 0.5,
          'intermediate_loss_type': 'BCE',
@@ -66,8 +72,7 @@ experiments_50 = {
          'eval_interval': 2,
          'learning_rate': 5e-4,
          'max_evals_no_imp': 25,
-         'feature_extractor_dropout': 0,
-         'classifier_dropout': 0
+
          }}
 
 
@@ -82,7 +87,9 @@ experiments_all = {
          'load_prop_scores': True,
          'save_prop_scores': False,
          'prop_scores_filename': 'balanced_kpi_prop_scores',
-         'random_seed': 0},
+         'random_seed': 0,
+         'normalization_method': 'Standard'
+         },
     'propagation':
         {'alpha': 0.8,
          'eps': 1e-6,
