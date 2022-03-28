@@ -121,9 +121,9 @@ class ClassifierTrainer(Trainer):
         return epoch_loss, epoch_intermediate_loss, epoch_classifier_loss, hits
 
     def eval(self, model, eval_loader, output_probs= False):
-        n_test_batches_per_epoch = int(np.ceil(len(eval_loader.dataset) / eval_loader.batch_size))
+        n_eval_batches_per_epoch = int(np.ceil(len(eval_loader.dataset) / eval_loader.batch_size))
         eval_loss = 0
-        epoch_intermediate_eval_loss = 0
+        eval_epoch_intermediate_eval_loss = 0
         epoch_classifier_loss = 0
         hits = 0
 
@@ -131,31 +131,31 @@ class ClassifierTrainer(Trainer):
         all_labels = []
         model.eval()
         with torch.no_grad():
-            for source_batch, terminal_batch, labels_batch in eval_loader:
+            for eval_source_batch, eval_terminal_batch, eval_labels_batch in eval_loader:
                 if self.device != 'cpu':
-                    source_batch, terminal_batch, labels_batch =\
-                        (x.to(self.device) for x in[source_batch, terminal_batch, labels_batch])
+                    eval_source_batch, eval_terminal_batch, eval_labels_batch =\
+                        (x.to(self.device) for x in[eval_source_batch, eval_terminal_batch, eval_labels_batch])
                 if torch.get_default_dtype() is torch.float32:
-                    source_batch, terminal_batch, = source_batch.float(), terminal_batch.float()
+                    eval_source_batch, eval_terminal_batch, = eval_source_batch.float(), eval_terminal_batch.float()
 
-                out, pred, pre_pred = model(source_batch, terminal_batch)
+                out, pred, pre_pred = model(eval_source_batch, eval_terminal_batch)
 
-                classifier_loss = self.criteria(out, labels_batch)
+                classifier_loss = self.criteria(out, eval_labels_batch)
                 if self.intermediate_loss_weight:
-                    intermediate_loss = self.intermediate_criteria(torch.squeeze(pre_pred),
-                                            torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.get_default_dtype()))
-                    epoch_intermediate_eval_loss += intermediate_loss.item()
+                    eval_intermediate_loss = self.intermediate_criteria(torch.squeeze(pre_pred),
+                                            torch.repeat_interleave(eval_labels_batch, model.n_experiments).to(torch.get_default_dtype()))
+                    eval_epoch_intermediate_eval_loss += eval_intermediate_loss.item()
 
                     loss = ((1-self.intermediate_loss_weight) * classifier_loss) +\
-                           (self.intermediate_loss_weight * intermediate_loss)
+                           (self.intermediate_loss_weight * eval_intermediate_loss)
                 else:
                     loss = classifier_loss
 
                 eval_loss += loss.item()
                 epoch_classifier_loss += classifier_loss.item()
-                hits += torch.sum(pred == labels_batch).item()
+                hits += torch.sum(pred == eval_labels_batch).item()
                 all_outs.append(out.cpu().detach().numpy())
-                all_labels.append(labels_batch)
+                all_labels.append(eval_labels_batch)
 
             # probs = torch.nn.functional.softmax(torch.squeeze(torch.cat(all_outs, 0)), dim=1).cpu().detach().numpy()
             probs = torch.nn.functional.softmax(torch.squeeze(Tensor(np.concatenate(all_outs, 0))), dim=1)
@@ -167,8 +167,8 @@ class ClassifierTrainer(Trainer):
             precision, recall, thresholds = precision_recall_curve(all_labels, probs[:, 1])
             mean_auc = auc(recall, precision)
 
-            avg_eval_loss = eval_loss / n_test_batches_per_epoch
-            avg_eval_intermediate_loss = epoch_intermediate_eval_loss / n_test_batches_per_epoch
-            avg_eval_classifier_loss = epoch_classifier_loss / n_test_batches_per_epoch
+            avg_eval_loss = eval_loss / n_eval_batches_per_epoch
+            avg_eval_intermediate_loss = eval_epoch_intermediate_eval_loss / n_eval_batches_per_epoch
+            avg_eval_classifier_loss = epoch_classifier_loss / n_eval_batches_per_epoch
             eval_acc = hits / len(eval_loader.dataset)
             return avg_eval_loss, avg_eval_intermediate_loss, avg_eval_classifier_loss, eval_acc, mean_auc, precision, recall
