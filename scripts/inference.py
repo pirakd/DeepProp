@@ -6,8 +6,8 @@ from deep_learning.data_loaders import LightDataset
 from deep_learning.trainer import ClassifierTrainer
 from torch import nn
 from torch.utils.data import DataLoader
-from utils import read_data, generate_raw_propagation_scores, load_model, log_results, get_time, \
-    get_root_path, save_propagation_score, load_pickle, train_test_split, get_normalization_constants, get_loss_function
+from utils import read_data, load_model, log_results, get_time, get_root_path, train_test_split,\
+    gen_propagation_scores, get_loss_function
 import torch
 import numpy as np
 import json
@@ -36,37 +36,18 @@ def run(sys_args):
     rng = np.random.RandomState(args['data']['random_seed'])
 
     # data read
-    network, directed_interactions, sources, terminals =\
+    network, directed_interactions, sources, terminals, id_to_degree =\
         read_data(args['data']['network_filename'], args['data']['directed_interactions_filename'],
                   args['data']['sources_filename'], args['data']['terminals_filename'],
                   args['data']['n_experiments'], args['data']['max_set_size'], rng)
-
 
     n_experiments = len(sources.keys())
     directed_interactions_pairs_list = np.array(directed_interactions.index)
     directed_interactions_source_type = np.array(directed_interactions.source)
     genes_ids_to_keep = sorted(list(set([x for pair in directed_interactions_pairs_list for x in pair])))
 
-    if args['data']['load_prop_scores']:
-        scores_file_path = path.join(root_path, 'input', 'propagation_scores', args['data']['prop_scores_filename'])
-        scores_dict = load_pickle(scores_file_path)
-        propagation_scores = scores_dict['propagation_scores']
-        row_id_to_idx, col_id_to_idx = scores_dict['row_id_to_idx'], scores_dict['col_id_to_idx']
-        normalization_constants_dict = scores_dict['normalization_constants']
-        assert scores_dict['data_args']['random_seed'] == args['data']['random_seed'], 'random seed of loaded data does not much current one'
-    else:
-        propagation_scores, row_id_to_idx, col_id_to_idx = generate_raw_propagation_scores(network, sources, terminals, genes_ids_to_keep,
-                                                                      args['propagation']['alpha'], args['propagation']['n_iterations'],
-                                                                      args['propagation']['eps'])
-        sources_indexes = [[row_id_to_idx[id] for id in set] for set in sources.values()]
-        terminals_indexes = [[row_id_to_idx[id] for id in set] for set in terminals.values()]
-        pairs_indexes = [(col_id_to_idx[pair[0]], col_id_to_idx[pair[1]]) for pair in directed_interactions_pairs_list]
-        normalization_constants_dict = get_normalization_constants(pairs_indexes, sources_indexes, terminals_indexes,
-                                                                   propagation_scores, args['data']['normalization_method'])
-        if args['data']['save_prop_scores']:
-            save_propagation_score(propagation_scores, normalization_constants_dict, row_id_to_idx, col_id_to_idx,
-                                   args['propagation'], args['data'], 'balanced_kpi_prop_scores')
-
+    propagation_scores, row_id_to_idx, col_id_to_idx, normalization_constants_dict = \
+        gen_propagation_scores(args, network, sources, terminals, genes_ids_to_keep, directed_interactions_pairs_list)
 
     train_indexes, val_indexes, test_indexes = train_test_split(len(directed_interactions_pairs_list), args['train']['train_val_test_split'],
                                                                 random_state=rng)

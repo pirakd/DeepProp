@@ -60,7 +60,7 @@ class ClassifierDataset(Dataset):
 
 class LightDataset(Dataset):
     def __init__(self, row_id_to_idx, col_id_to_idx, propagation_scores, directed_pairs_list,
-                 sources, terminals, normalization_method, normalization_constants, pairs_source_type=None):
+                 sources, terminals, normalization_method, normalization_constants, pairs_source_type=None, id_to_degree=None):
         self.row_id_to_idx = row_id_to_idx
         self.col_id_to_idx = col_id_to_idx
         self.propagation_scores = propagation_scores
@@ -72,6 +72,7 @@ class LightDataset(Dataset):
         normalizer = self.get_normalization_method(normalization_method)
         self.normalizer = normalizer(normalization_constants)
         self.pairs_source_type = pairs_source_type
+        self.idx_to_degree = {self.col_id_to_idx[id]: degree for id, degree in id_to_degree.items() if id in self.col_id_to_idx}
 
     def __len__(self):
         return len(self.pairs_indexes) * 2
@@ -85,6 +86,10 @@ class LightDataset(Dataset):
         pair = self.pairs_indexes[idx]
         if neg_flag:
             pair = (pair[1], pair[0])
+
+        from_degree = self.idx_to_degree[pair[0]]
+        to_degree =  self.idx_to_degree[pair[1]]
+
         pair_source_type = self.pairs_source_type[idx] if self.pairs_source_type is not None else None
         source_sample = np.zeros((len(self.source_indexes), self.longest_source, 2))
         terminal_sample = np.zeros((len(self.source_indexes), self.longest_terminal, 2))
@@ -95,7 +100,7 @@ class LightDataset(Dataset):
             terminal_sample[exp_idx, :len(self.terminal_indexes[exp_idx]), :] =\
                 self.normalizer(self.propagation_scores[:, pair][self.terminal_indexes[exp_idx], :])
 
-        return source_sample, terminal_sample, label, pair, pair_source_type
+        return source_sample, terminal_sample, label, pair, pair_source_type, (from_degree,to_degree)
 
     def get_experiment_indexes(self, experiment_id_sets):
         experiment_indexes = []
@@ -129,5 +134,6 @@ class PowerTransform:
         self.lambda_const = normalization_constants['lambda']
         self.mean = normalization_constants['mean']
         self.std = normalization_constants['std']
+
     def __call__(self, x, *args, **kwargs):
         return (((x**self.lambda_const - 1)/self.lambda_const) - self.mean) / self.std

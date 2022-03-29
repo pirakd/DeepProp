@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 from utils import get_pulling_func
 from copy import deepcopy
+
+
 class InvarianceModel(nn.Module):
     def __init__(self, feature_extractor, pulling_op):
         super(InvarianceModel, self).__init__()
@@ -53,6 +55,8 @@ class DeepProp(nn.Module):
                 nn.Linear((2 * last_feature_dim) + self.experiment_embedding_size, c_layers_size[0]))
         else:
             classifier_layers.append(nn.Linear((2 * last_feature_dim), c_layers_size[0]))
+        classifier_layers.append(nn.ReLU(inplace=True))
+
         for idx in range(len(c_layers_size))[:-1]:
             classifier_layers.append(nn.Linear(c_layers_size[idx], c_layers_size[idx + 1]))
             classifier_layers.append(nn.ReLU(inplace=True))
@@ -89,4 +93,3 @@ class DeepPropClassifier(nn.Module):
         out = self.classifier(combined_2)
         pred = torch.argmax(out, dim=1)
         return out, pred, combined
-

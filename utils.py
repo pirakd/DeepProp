@@ -11,9 +11,8 @@ import torch
 from deep_learning.deep_utils import FocalLoss
 from tqdm import tqdm
 
-def balance_dataset(network, directed_interactions, rng):
+def balance_dataset(graph, directed_interactions, rng):
     sources = directed_interactions['source'].unique()
-    graph = nx.from_pandas_edgelist(network.reset_index(), 0, 1, 'edge_score')
     directed_interactions = directed_interactions[directed_interactions.index.get_level_values(0).isin(graph) & directed_interactions.index.get_level_values(1).isin(graph)]
     degree = dict(graph.degree(weight='edge_score'))
 
@@ -41,6 +40,7 @@ def read_network(network_filename, translator):
         network.rename(index=up_do_date_ids, inplace=True)
     return network
 
+
 def read_directed_interactions(directed_interactions_folder, directed_interaction_filename, gene_translator):
     if isinstance(directed_interaction_filename, str):
         directed_interaction_filename = [directed_interaction_filename]
@@ -64,7 +64,7 @@ def read_directed_interactions(directed_interactions_folder, directed_interactio
 
         all_interactions = pd.concat((all_interactions, directed_interactions))
 
-    all_interactions['edge_score'] = 1
+    all_interactions['edge_score'] = 0.8
     all_interactions.index = pd.MultiIndex.from_arrays(all_interactions[['from', 'to']].values.T)
     all_interactions = all_interactions[~all_interactions.index.duplicated(keep='first')]
 
@@ -108,7 +108,8 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     directed_interactions = read_directed_interactions(directed_interaction_folder, directed_interaction_filename, translator)
     merged_network =\
         pd.concat([network.drop(directed_interactions.index.intersection(network.index)), directed_interactions,])
-    directed_interactions = balance_dataset(merged_network, directed_interactions, rng)
+    merged_graph = nx.from_pandas_edgelist(network.reset_index(), 0, 1, 'edge_score')
+    directed_interactions = balance_dataset(merged_graph, directed_interactions, rng)
     sources, terminals = read_priors(sources_file_path, terminals_file_path, translator)
 
     # constrain to network's genes
@@ -133,12 +134,37 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     sources = {exp_name: sources[exp_name] for exp_name in filtered_experiments}
     terminals = {exp_name: terminals[exp_name] for exp_name in filtered_experiments}
 
-    return merged_network, directed_interactions, sources, terminals
+    id_to_degree =  dict(merged_graph.degree(weight='edge_score'))
 
+    return merged_network, directed_interactions, sources, terminals, id_to_degree
+
+
+def gen_propagation_scores(args, network, sources, terminals, genes_ids_to_keep, directed_interactions_pairs_list):
+    root_path = get_root_path()
+    if args['data']['load_prop_scores']:
+        scores_file_path = path.join(root_path, 'input', 'propagation_scores', args['data']['prop_scores_filename'])
+        scores_dict = load_pickle(scores_file_path)
+        propagation_scores = scores_dict['propagation_scores']
+        row_id_to_idx, col_id_to_idx = scores_dict['row_id_to_idx'], scores_dict['col_id_to_idx']
+        normalization_constants_dict = scores_dict['normalization_constants']
+        assert scores_dict['data_args']['random_seed'] == args['data']['random_seed'], 'random seed of loaded data does not much current one'
+    else:
+        propagation_scores, row_id_to_idx, col_id_to_idx = generate_raw_propagation_scores(network, sources, terminals, genes_ids_to_keep,
+                                                                      args['propagation']['alpha'], args['propagation']['n_iterations'],
+                                                                      args['propagation']['eps'])
+        sources_indexes = [[row_id_to_idx[id] for id in set] for set in sources.values()]
+        terminals_indexes = [[row_id_to_idx[id] for id in set] for set in terminals.values()]
+        pairs_indexes = [(col_id_to_idx[pair[0]], col_id_to_idx[pair[1]]) for pair in directed_interactions_pairs_list]
+        normalization_constants_dict = get_normalization_constants(pairs_indexes, sources_indexes, terminals_indexes,
+                                                                   propagation_scores, args['data']['normalization_method'])
+        if args['data']['save_prop_scores']:
+            save_propagation_score(propagation_scores, normalization_constants_dict, row_id_to_idx, col_id_to_idx,
+                                   args['propagation'], args['data'],  args['data']['prop_scores_filename'])
+    return propagation_scores, row_id_to_idx, col_id_to_idx, normalization_constants_dict
 
 def generate_similarity_matrix(graph, propagate_alpha):
     genes = sorted(graph.nodes)
-    matrix = nx.to_scipy_sparse_matrix(graph, genes, weight=2)
+    matrix = nx.to_scipy_sparse_matrix(graph, genes, weight='edge_score')
     norm_matrix = scipy.sparse.diags(1 / np.sqrt(matrix.sum(0).A1))
     matrix = norm_matrix * matrix * norm_matrix
     return propagate_alpha * matrix, genes
@@ -193,7 +219,6 @@ def generate_feature_columns(network, sources, terminals, indexes_to_keep, propa
 
 
 def generate_raw_propagation_scores(network, sources, terminals, genes_ids_to_keep, propagate_alpha, propagate_iterations, propagation_epsilon):
-    all_source_terminal_genes = sorted(list(set.union(set.union(*sources.values()), set.union(*terminals.values()))))
     all_source_terminal_genes = sorted(list(set.union(set.union(*sources.values()), set.union(*terminals.values()))))
     gene_id_to_idx, matrix, num_genes = generate_propagate_data(network, propagate_alpha)
     gene_idx_to_id = {xx:x for x,xx in gene_id_to_idx.items()}

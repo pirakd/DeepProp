@@ -79,6 +79,8 @@ class ClassifierTrainer(Trainer):
                 if no_improvement_counter == max_evals_no_improvement:
                     print('early stopping on epoch {}, best epoch {}'.format(epoch, best_epoch))
                     break
+                if epoch + 1 == self.n_epochs:
+                    print('reached maximum number of epochs, best epoch {}'.format(best_epoch))
 
         train_stats = {'best_val_loss':best_eval_loss, 'best_acc':best_acc, 'best_auc':best_auc,
                        'best_epoch':best_epoch}
@@ -90,7 +92,7 @@ class ClassifierTrainer(Trainer):
         epoch_classifier_loss = 0
         hits = 0
         model.train()
-        for source_batch, terminal_batch, labels_batch, pair_batch, pair_source_type in train_loader:
+        for source_batch, terminal_batch, labels_batch, pair_batch, pair_source_type, pair_degree in train_loader:
             if self.device != 'cpu':
                 source_batch, terminal_batch, labels_batch =\
                     (x.to(self.device) for x in[source_batch, terminal_batch, labels_batch])
@@ -131,7 +133,7 @@ class ClassifierTrainer(Trainer):
         all_labels = []
         model.eval()
         with torch.no_grad():
-            for eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_batch, eval_pair_source_type_batch in eval_loader:
+            for eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_batch, eval_pair_source_type_batch, eval_pair_degree_batch in eval_loader:
                 if self.device != 'cpu':
                     eval_source_batch, eval_terminal_batch, eval_labels_batch =\
                         (x.to(self.device) for x in[eval_source_batch, eval_terminal_batch, eval_labels_batch])
@@ -172,3 +174,24 @@ class ClassifierTrainer(Trainer):
             avg_eval_classifier_loss = epoch_classifier_loss / n_eval_batches_per_epoch
             eval_acc = hits / len(eval_loader.dataset)
             return avg_eval_loss, avg_eval_intermediate_loss, avg_eval_classifier_loss, eval_acc, mean_auc, precision, recall
+
+    def predict(self, model, eval_loader):
+        all_outs = []
+        all_pairs = []
+        model.eval()
+        with torch.no_grad():
+            for eval_source_batch, eval_terminal_batch, _, eval_pair_batch, eval_pair_source_type_batch in eval_loader:
+                if self.device != 'cpu':
+                    eval_source_batch, eval_terminal_batch =\
+                        (x.to(self.device) for x in[eval_source_batch, eval_terminal_batch])
+                if torch.get_default_dtype() is torch.float32:
+                    eval_source_batch, eval_terminal_batch, = eval_source_batch.float(), eval_terminal_batch.float()
+
+                out, pred, pre_pred = model(eval_source_batch, eval_terminal_batch)
+                all_outs.append(out.cpu().detach().numpy())
+                all_pairs.append(torch.stack(eval_pair_batch).detach().cpu().numpy())
+
+            all_probs = torch.nn.functional.softmax(torch.squeeze(Tensor(np.concatenate(all_outs, 0))), dim=1).numpy()
+            all_pairs = np.hstack(all_pairs).T
+
+        return all_probs, all_pairs
