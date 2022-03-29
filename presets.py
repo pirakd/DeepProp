@@ -10,7 +10,7 @@ experiments_20 = {
          'save_prop_scores': False,
          'prop_scores_filename': 'balanced_kpi_prop_scores',
          'random_seed': 0,
-         'normalization_method': 'standard'}, # Standard, Power
+         'normalization_method': 'standard'},  # Standard, Power
     'propagation':
         {'alpha': 0.8,
          'eps': 1e-6,
@@ -21,17 +21,18 @@ experiments_20 = {
          'pulling_func': 'mean',
          'exp_emb_size': 4,
          'feature_extractor_dropout': 0,
-         'classifier_dropout': 0
+         'classifier_dropout': 0,
+         'pair_degree_feature': 1
          },
     'train':
         {'intermediate_loss_weight': 0.5,
          'intermediate_loss_type': 'BCE',
          'focal_gamma': 1,
          'train_val_test_split': [0.66, 0.14, 0.2], # sum([train, val, test])=1
-         'train_batch_size': 12,
+         'train_batch_size': 4,
          'test_batch_size': 32,
-         'n_epochs':1000 ,
-         'eval_interval': 2,
+         'n_epochs':50 ,
+         'eval_interval': 10,
          'learning_rate': 1e-3,
          'max_evals_no_imp': 25}}
 
@@ -59,7 +60,8 @@ experiments_50 = {
          'pulling_func': 'mean',
          'exp_emb_size': 12,
          'feature_extractor_dropout': 0,
-         'classifier_dropout': 0
+         'classifier_dropout': 0,
+         'pair_degree_feature': 0
          },
     'train':
         {'intermediate_loss_weight': 0.5,
@@ -100,7 +102,8 @@ experiments_all = {
          'pulling_func': 'mean',
          'exp_emb_size': 20,
          'feature_extractor_dropout': 0,
-         'classifier_dropout': 0
+         'classifier_dropout': 0,
+         'pair_degree_feature': 0
          },
     'train':
         {'intermediate_loss_weight': 0.75,

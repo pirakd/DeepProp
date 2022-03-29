@@ -1,7 +1,6 @@
 from torch.utils.data import Dataset
 import numpy as np
 import torch
-
 from sklearn.preprocessing import  PowerTransformer
 
 class ClassifierDataset(Dataset):
@@ -73,6 +72,7 @@ class LightDataset(Dataset):
         self.normalizer = normalizer(normalization_constants)
         self.pairs_source_type = pairs_source_type
         self.idx_to_degree = {self.col_id_to_idx[id]: degree for id, degree in id_to_degree.items() if id in self.col_id_to_idx}
+        self.degree_normalizer = self.get_degree_normalizar()
 
     def __len__(self):
         return len(self.pairs_indexes) * 2
@@ -87,8 +87,8 @@ class LightDataset(Dataset):
         if neg_flag:
             pair = (pair[1], pair[0])
 
-        from_degree = self.idx_to_degree[pair[0]]
-        to_degree =  self.idx_to_degree[pair[1]]
+        from_degree = self.degree_normalizer(self.idx_to_degree[pair[0]])
+        to_degree =  self.degree_normalizer(self.idx_to_degree[pair[1]])
 
         pair_source_type = self.pairs_source_type[idx] if self.pairs_source_type is not None else None
         source_sample = np.zeros((len(self.source_indexes), self.longest_source, 2))
@@ -100,7 +100,7 @@ class LightDataset(Dataset):
             terminal_sample[exp_idx, :len(self.terminal_indexes[exp_idx]), :] =\
                 self.normalizer(self.propagation_scores[:, pair][self.terminal_indexes[exp_idx], :])
 
-        return source_sample, terminal_sample, label, pair, pair_source_type, (from_degree,to_degree)
+        return source_sample, terminal_sample, label, pair, pair_source_type, np.array([from_degree, to_degree])
 
     def get_experiment_indexes(self, experiment_id_sets):
         experiment_indexes = []
@@ -118,10 +118,23 @@ class LightDataset(Dataset):
         else:
             assert 0, '{} is not a valid normalization method name'.format(normalization_method)
 
+    def get_degree_normalizar(self):
+        all_degrees = []
+        for pair in self.pairs_indexes:
+            all_degrees.append(self.idx_to_degree[pair[0]])
+            all_degrees.append(self.idx_to_degree[pair[1]])
+        all_degrees = np.array(all_degrees)[:, np.newaxis]
+        pt = PowerTransformer(method='box-cox', standardize=False)
+        transformed = pt.fit_transform(all_degrees)
+        mean = np.mean(transformed)
+        std = np.std(transformed)
+        return PowerTransform({'lambda': pt.lambdas_[0], 'mean': mean, 'std': std})
+
 class StandardNormalizer():
     def __init__(self, normalization_constants):
         self.dataset_mean = normalization_constants['mean']
         self.dataset_std = normalization_constants['std']
+
     def __call__(self, x, *args, **kwargs):
         return (x-self.dataset_mean) / self.dataset_std
 

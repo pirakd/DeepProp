@@ -94,12 +94,12 @@ class ClassifierTrainer(Trainer):
         model.train()
         for source_batch, terminal_batch, labels_batch, pair_batch, pair_source_type, pair_degree in train_loader:
             if self.device != 'cpu':
-                source_batch, terminal_batch, labels_batch =\
-                    (x.to(self.device) for x in[source_batch, terminal_batch, labels_batch])
+                source_batch, terminal_batch, labels_batch, pair_degree =\
+                    (x.to(self.device) for x in[source_batch, terminal_batch, labels_batch, pair_degree])
             if torch.get_default_dtype() is torch.float32:
-                source_batch, terminal_batch, = source_batch.float(), terminal_batch.float()
+                source_batch, terminal_batch, pair_degree = source_batch.float(), terminal_batch.float(), pair_degree.float()
 
-            out, pred, pre_pred = model(source_batch, terminal_batch)
+            out, pred, pre_pred = model(source_batch, terminal_batch, pair_degree)
 
             classifier_loss = self.criteria(out, labels_batch)
             if self.intermediate_loss_weight:
@@ -135,12 +135,12 @@ class ClassifierTrainer(Trainer):
         with torch.no_grad():
             for eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_batch, eval_pair_source_type_batch, eval_pair_degree_batch in eval_loader:
                 if self.device != 'cpu':
-                    eval_source_batch, eval_terminal_batch, eval_labels_batch =\
-                        (x.to(self.device) for x in[eval_source_batch, eval_terminal_batch, eval_labels_batch])
+                    eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_degree_batch =\
+                        (x.to(self.device) for x in[eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_degree_batch])
                 if torch.get_default_dtype() is torch.float32:
-                    eval_source_batch, eval_terminal_batch, = eval_source_batch.float(), eval_terminal_batch.float()
+                    eval_source_batch, eval_terminal_batch, eval_pair_degree_batch = eval_source_batch.float(), eval_terminal_batch.float(), eval_pair_degree_batch.float()
 
-                out, pred, pre_pred = model(eval_source_batch, eval_terminal_batch)
+                out, pred, pre_pred = model(eval_source_batch, eval_terminal_batch, eval_pair_degree_batch)
 
                 classifier_loss = self.criteria(out, eval_labels_batch)
                 if self.intermediate_loss_weight:
