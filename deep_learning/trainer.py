@@ -176,6 +176,7 @@ class ClassifierTrainer(Trainer):
             return avg_eval_loss, avg_eval_intermediate_loss, avg_eval_classifier_loss, eval_acc, mean_auc, precision, recall
 
     def predict(self, model, eval_loader):
+
         all_outs = []
         all_pairs = []
         model.eval()
@@ -195,3 +196,91 @@ class ClassifierTrainer(Trainer):
             all_pairs = np.hstack(all_pairs).T
 
         return all_probs, all_pairs
+
+
+
+
+
+
+
+
+
+
+
+
+    def eval_by_source(self, model, eval_loader, output_probs= False, by_source_type=False):
+        type_output_dict = {'probs': [], 'labels':[], 'intermediate_loss':0, 'classifier_loss':0, 'loss':0, 'hits':0}
+        type_result_dict = {'mean_auc':0 , 'avg_loss':0, 'avg_classifier_loss':0, 'avg_intermediate_loss':0, 'acc':0}
+
+        output_per_type_dict = {}
+        output_per_type_dict['overall'] = copy.deepcopy(type_output_dict)
+        results_per_type_dict = {}
+        results_per_type_dict['overall'] = copy.deepcopy(type_result_dict)
+
+
+        model.eval()
+        with torch.no_grad():
+            for eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_batch, eval_pair_source_type_batch, eval_pair_degree_batch in eval_loader:
+                if self.device != 'cpu':
+                    eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_degree_batch =\
+                        (x.to(self.device) for x in[eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_degree_batch])
+                if torch.get_default_dtype() is torch.float32:
+                    eval_source_batch, eval_terminal_batch, eval_pair_degree_batch = eval_source_batch.float(), eval_terminal_batch.float(), eval_pair_degree_batch.float()
+
+                unique_types = np.unique(eval_pair_source_type_batch)
+                for unique_type in unique_types:
+                    type_idx = [x for x, xx in enumerate(eval_pair_source_type_batch) if xx == unique_type]
+                    type_source_batch = eval_source_batch[type_idx]
+                    type_terminal_batch = eval_terminal_batch[type_idx]
+                    type_labels = eval_labels_batch[type_idx]
+                    type_pair_degree_batch = eval_pair_degree_batch[type_idx]
+                    out, pred, pre_pred = model(type_source_batch, type_terminal_batch, type_pair_degree_batch)
+
+                    classifier_loss = self.criteria(out, type_labels)
+                    if self.intermediate_loss_weight:
+                        eval_intermediate_loss = self.intermediate_criteria(torch.squeeze(pre_pred),
+                                                torch.repeat_interleave(type_labels, model.n_experiments).to(torch.get_default_dtype()))
+
+                        loss = ((1-self.intermediate_loss_weight) * classifier_loss) +\
+                               (self.intermediate_loss_weight * eval_intermediate_loss)
+                    else:
+                        loss = classifier_loss
+
+                    if unique_type not in output_per_type_dict:
+                        output_per_type_dict[unique_type] = copy.deepcopy(type_output_dict)
+
+                    output_per_type_dict[unique_type]['intermediate_loss'] += eval_intermediate_loss.item()
+                    output_per_type_dict[unique_type]['classifier_loss'] += classifier_loss.item()
+                    output_per_type_dict[unique_type]['loss'] += loss.item()
+                    output_per_type_dict[unique_type]['hits'] += torch.sum(pred == type_labels).item()
+                    output_per_type_dict[unique_type]['probs'].append(out.cpu().detach().numpy())
+                    output_per_type_dict[unique_type]['labels'].append(type_labels)
+
+                    output_per_type_dict['overall']['intermediate_loss'] += eval_intermediate_loss.item()
+                    output_per_type_dict['overall']['classifier_loss'] += classifier_loss.item()
+                    output_per_type_dict['overall']['loss'] += loss.item()
+                    output_per_type_dict['overall']['hits'] += torch.sum(pred == type_labels).item()
+                    output_per_type_dict['overall']['probs'].append(out.cpu().detach().numpy())
+                    output_per_type_dict['overall']['labels'].append(type_labels)
+
+
+            for unique_type in output_per_type_dict.keys():
+                output_per_type_dict[unique_type]['probs'] = torch.nn.functional.softmax(torch.squeeze(Tensor(np.concatenate(output_per_type_dict[unique_type]['probs'], 0))), dim=1)
+                output_per_type_dict[unique_type]['labels'] = torch.squeeze(torch.cat(output_per_type_dict[unique_type]['labels'])).cpu().detach().numpy()
+
+        if output_probs:
+            return  output_per_type_dict
+
+        else:
+            for unique_type in output_per_type_dict.keys():
+                results_per_type_dict[unique_type] = copy.deepcopy(type_result_dict)
+                n_type_samples = len(output_per_type_dict[unique_type]['labels'])
+                precision, recall, thresholds = precision_recall_curve(output_per_type_dict[unique_type]['labels'],
+                                                                       output_per_type_dict[unique_type]['probs'][:, 1])
+                results_per_type_dict[unique_type]['mean_auc'] = auc(recall, precision)
+                results_per_type_dict[unique_type]['avg_loss'] = output_per_type_dict[unique_type]['loss'] / n_type_samples
+                results_per_type_dict[unique_type]['avg_intermediate_loss']= output_per_type_dict[unique_type]['intermediate_loss'] / n_type_samples
+                results_per_type_dict[unique_type]['avg_classifier_loss'] = output_per_type_dict[unique_type]['classifier_loss'] / n_type_samples
+                results_per_type_dict[unique_type]['acc'] = output_per_type_dict[unique_type]['hits'] / n_type_samples
+
+            return results_per_type_dict

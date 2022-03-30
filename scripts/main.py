@@ -15,7 +15,6 @@ import numpy as np
 from presets import experiments_20, experiments_50, experiments_all
 from scripts.scripts_utils import sources_filenmae_dict, terminals_filenmae_dict
 import argparse
-import networkx as nx
 
 
 def run(sys_args):
@@ -78,7 +77,7 @@ def run(sys_args):
     optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args['train']['learning_rate'])
     intermediate_loss_type = get_loss_function(args['train']['intermediate_loss_type'],
                                                focal_gamma=args['train']['focal_gamma'])
-    trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyLoss(), intermediate_criteria=intermediate_loss_type,
+    trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyLoss(reduction='sum'), intermediate_criteria=intermediate_loss_type,
                                 intermediate_loss_weight=args['train']['intermediate_loss_weight'],
                                 optimizer=optimizer, eval_metric=None, eval_interval=args['train']['eval_interval'], device=device)
 
@@ -87,15 +86,13 @@ def run(sys_args):
                                             max_evals_no_improvement=args['train']['max_evals_no_imp'])
 
     if len(test_dataset):
-        test_loss, test_intermediate_loss, test_classifier_loss, test_acc, test_auc, precision, recall = \
-            trainer.eval(best_model, test_loader)
-        test_stats = {'test_loss': test_loss, 'test_acc': test_acc, 'test_auc': test_auc,
-                      'test_intermediate_loss': test_intermediate_loss, 'test_classifier_loss': test_classifier_loss}
-        print('Test PR-AUC: {:.2f}'.format(test_auc))
+        test_results_dict = \
+            trainer.eval_by_source(best_model, test_loader)
+        print(test_results_dict)
     else:
-        test_stats = {}
+        test_results_dict = {}
 
-    results_dict = {'train_stats': train_stats, 'test_stats': test_stats, 'n_experiments': n_experiments}
+    results_dict = {'train_stats': train_stats, 'test_stats': test_results_dict, 'n_experiments': n_experiments}
     log_results(output_file_path,  args, results_dict, best_model)
 
 
@@ -105,9 +102,9 @@ if __name__ == '__main__':
     save_prop = False
     n_exp = 2
     split = [0.66, 0.14, 0.2]
-    interaction_type = ['KPI']
+    interaction_type = ['KPI', 'STKE']
     device = 'cpu'
-    prop_scores_filename = 'drug_KPI'
+    prop_scores_filename = 'drug_KPI_STKE'
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ex', '--ex_type', dest='experiments_type', type=str, help='name of experiment type(drug, colon, etc.)', default=input_type)
@@ -122,6 +119,6 @@ if __name__ == '__main__':
                         help='Name of prop score file(save/load)', default=prop_scores_filename)
 
     args = parser.parse_args()
-    # args.load_prop_scores =  True
+    args.load_prop_scores = True
     # args.save_prop_scores =  True
     run(args)
