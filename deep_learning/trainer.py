@@ -198,25 +198,13 @@ class ClassifierTrainer(Trainer):
         return all_probs, all_pairs
 
 
-
-
-
-
-
-
-
-
-
-
     def eval_by_source(self, model, eval_loader, output_probs= False, by_source_type=False):
-        type_output_dict = {'probs': [], 'labels':[], 'intermediate_loss':0, 'classifier_loss':0, 'loss':0, 'hits':0}
-        type_result_dict = {'mean_auc':0 , 'avg_loss':0, 'avg_classifier_loss':0, 'avg_intermediate_loss':0, 'acc':0}
-
-        output_per_type_dict = {}
+        type_output_dict = {'probs': [], 'labels': [], 'intermediate_loss': 0, 'classifier_loss': 0, 'loss': 0, 'hits': 0}
+        type_result_dict = {'mean_auc': 0, 'avg_loss': 0, 'avg_classifier_loss': 0, 'avg_intermediate_loss': 0, 'acc':0}
+        output_per_type_dict = dict()
         output_per_type_dict['overall'] = copy.deepcopy(type_output_dict)
-        results_per_type_dict = {}
+        results_per_type_dict = dict()
         results_per_type_dict['overall'] = copy.deepcopy(type_result_dict)
-
 
         model.eval()
         with torch.no_grad():
@@ -263,13 +251,12 @@ class ClassifierTrainer(Trainer):
                     output_per_type_dict['overall']['probs'].append(out.cpu().detach().numpy())
                     output_per_type_dict['overall']['labels'].append(type_labels)
 
-
             for unique_type in output_per_type_dict.keys():
                 output_per_type_dict[unique_type]['probs'] = torch.nn.functional.softmax(torch.squeeze(Tensor(np.concatenate(output_per_type_dict[unique_type]['probs'], 0))), dim=1)
                 output_per_type_dict[unique_type]['labels'] = torch.squeeze(torch.cat(output_per_type_dict[unique_type]['labels'])).cpu().detach().numpy()
 
         if output_probs:
-            return  output_per_type_dict
+            return output_per_type_dict
 
         else:
             for unique_type in output_per_type_dict.keys():
