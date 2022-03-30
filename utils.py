@@ -299,7 +299,7 @@ def get_power_transform_lambda(pairs_indexes, source_indexes, terminal_indexes, 
     transformed = pt.fit_transform(sampled_elements[:, np.newaxis])
     mean = np.mean(transformed)
     std = np.std(transformed)
-    return {'lambda':pt.lambdas_, 'mean':mean, 'std':std}
+    return {'lambda':pt.lambdas_[0], 'mean':mean, 'std':std}
 
 def get_normalization_constants(pairs_indexes, source_indexes, terminal_indexes, propagation_scores, normalization_method):
     if normalization_method == 'standard':
