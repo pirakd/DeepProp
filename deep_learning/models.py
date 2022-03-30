@@ -56,7 +56,7 @@ class DeepProp(nn.Module):
 
     def init_classifier(self, last_feature_dim, c_layers_size, dropout_rate=None):
         classifier_layers = []
-        num_added_features = self.experiment_embedding_size + 2 if self.pair_degree_feature else 0
+        num_added_features = self.experiment_embedding_size + (2 if self.pair_degree_feature else 0)
         classifier_layers.append(
             nn.Linear((2 * last_feature_dim) + num_added_features, c_layers_size[0]))
         classifier_layers.append(nn.ReLU(inplace=True))
