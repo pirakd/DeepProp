@@ -47,17 +47,15 @@ class ClassifierTrainer(Trainer):
         best_loss, best_auc, best_acc, best_epoch = 0,0,0,0
         best_eval_loss = np.inf
         no_improvement_counter = 0
-
-        n_batches_per_epoch = int(np.ceil(len(train_loader.dataset) / train_loader.batch_size))
         n_samples_per_epoch = len(train_loader.dataset)
 
         for epoch in range(self.n_epochs):
             epoch_loss, epoch_intermediate_loss, epoch_classifier_loss, epoch_hits = self.train_single_epoch(model, train_loader)
-            self.losses['train'].append(epoch_loss/(n_batches_per_epoch))
+            self.losses['train'].append(epoch_loss/(n_samples_per_epoch))
             self.metrics['train'].append(epoch_hits/n_samples_per_epoch)
             print('epoch {}, train_loss: {:.2e}, classifier_loss: {:.2e}, intermediate_loss:{:.2e} train_acc:{:.2f}'
-                  .format(epoch, self.losses['train'][-1], epoch_classifier_loss/n_batches_per_epoch,
-                          epoch_intermediate_loss/n_batches_per_epoch,  epoch_hits/n_samples_per_epoch))
+                  .format(epoch, self.losses['train'][-1], epoch_classifier_loss/n_samples_per_epoch,
+                          epoch_intermediate_loss/n_samples_per_epoch,  epoch_hits/n_samples_per_epoch))
 
             if (np.mod(epoch, self.eval_interval) == 0 and epoch) or (epoch+1 == self.n_epochs):
                 avg_eval_loss, avg_eval_intermediate_loss, avg_eval_classifier_loss, eval_acc, eval_auc, _, _ = self.eval(model, eval_loader)
@@ -123,7 +121,7 @@ class ClassifierTrainer(Trainer):
         return epoch_loss, epoch_intermediate_loss, epoch_classifier_loss, hits
 
     def eval(self, model, eval_loader, output_probs= False):
-        n_eval_batches_per_epoch = int(np.ceil(len(eval_loader.dataset) / eval_loader.batch_size))
+        n_samples = len(eval_loader.dataset)
         eval_loss = 0
         eval_epoch_intermediate_eval_loss = 0
         epoch_classifier_loss = 0
@@ -169,10 +167,10 @@ class ClassifierTrainer(Trainer):
             precision, recall, thresholds = precision_recall_curve(all_labels, probs[:, 1])
             mean_auc = auc(recall, precision)
 
-            avg_eval_loss = eval_loss / n_eval_batches_per_epoch
-            avg_eval_intermediate_loss = eval_epoch_intermediate_eval_loss / n_eval_batches_per_epoch
-            avg_eval_classifier_loss = epoch_classifier_loss / n_eval_batches_per_epoch
-            eval_acc = hits / len(eval_loader.dataset)
+            avg_eval_loss = eval_loss / n_samples
+            avg_eval_intermediate_loss = eval_epoch_intermediate_eval_loss / n_samples
+            avg_eval_classifier_loss = epoch_classifier_loss / n_samples
+            eval_acc = hits / n_samples
             return avg_eval_loss, avg_eval_intermediate_loss, avg_eval_classifier_loss, eval_acc, mean_auc, precision, recall
 
     def predict(self, model, eval_loader):
