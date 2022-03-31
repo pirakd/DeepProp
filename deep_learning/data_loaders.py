@@ -114,7 +114,7 @@ class LightDataset(Dataset):
         if normalization_method == 'standard':
             return StandardNormalizer
         elif normalization_method == 'power':
-            return PowerTransform
+            return PowerNormalizer
         else:
             assert 0, '{} is not a valid normalization method name'.format(normalization_method)
 
@@ -128,7 +128,7 @@ class LightDataset(Dataset):
         transformed = pt.fit_transform(all_degrees)
         mean = np.mean(transformed)
         std = np.std(transformed)
-        return PowerTransform({'lambda': pt.lambdas_[0], 'mean': mean, 'std': std})
+        return PowerNormalizer({'lambda': pt.lambdas_[0], 'mean': mean, 'std': std})
 
 class StandardNormalizer():
     def __init__(self, normalization_constants):
@@ -139,14 +139,17 @@ class StandardNormalizer():
         return (x-self.dataset_mean) / self.dataset_std
 
 
-class PowerTransform:
+class PowerNormalizer:
     """
-    box-cox transform
+    yeo_johnson transform
     """
     def __init__(self, normalization_constants):
-        self.lambda_const = normalization_constants['lambda']
+        from scipy.stats import yeojohnson
+        from functools import partial
+        self.transformer = partial(yeojohnson, lmbda=normalization_constants['lambda'])
+        self.lmbda = normalization_constants['lambda']
         self.mean = normalization_constants['mean']
         self.std = normalization_constants['std']
 
     def __call__(self, x, *args, **kwargs):
-        return (((x**self.lambda_const - 1)/self.lambda_const) - self.mean) / self.std
+        return (self.transformer(x) - self.mean) / self.std

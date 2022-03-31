@@ -284,22 +284,23 @@ def get_power_transform_lambda(pairs_indexes, source_indexes, terminal_indexes, 
         p_sample = 0.2
     elif ratio >= 1:
         p_sample = 1
-    else: # 0.2 < ratio < 1:
+    else: # 0.2 < ratio < 1:len(sa
         p_sample = ratio
 
+    sampled_idx = np.nonzero(np.random.binomial(1, p_sample, int(p_sample * total_examples)))[0]
+    pair_idxs = (sampled_idx//len(pairs_indexes)).astype(int)
+    exp_idx = np.mod(sampled_idx, len(source_indexes))
     sampled_elements = []
-    for pair in pairs_indexes:
-        for exp_idx in range(len(source_indexes)):
-            if np.random.binomial(1, p_sample, 1)[0]:
-                sampled_elements.append(propagation_scores[:, pair][source_indexes[exp_idx], :].ravel().tolist())
-                sampled_elements.append(propagation_scores[:, pair][terminal_indexes[exp_idx], :].ravel().tolist())
+    for idx in range(len(sampled_idx)):
+        sampled_elements.append(propagation_scores[:, [pairs_indexes[pair_idxs[idx]]]][source_indexes[exp_idx[idx]], :].ravel().tolist())
+        sampled_elements.append(propagation_scores[:, [pairs_indexes[pair_idxs[idx]]]][terminal_indexes[exp_idx[idx]], :].ravel().tolist())
 
     sampled_elements = np.array([x for xx in sampled_elements for x in xx])
-    pt = PowerTransformer(method='box-cox', standardize=False)
+    pt = PowerTransformer(method='yeo-johnson', standardize=False)
     transformed = pt.fit_transform(sampled_elements[:, np.newaxis])
     mean = np.mean(transformed)
     std = np.std(transformed)
-    return {'lambda':pt.lambdas_[0], 'mean':mean, 'std':std}
+    return {'lambda':pt.lambdas_[0], 'mean': mean, 'std':std}
 
 def get_normalization_constants(pairs_indexes, source_indexes, terminal_indexes, propagation_scores, normalization_method):
     if normalization_method == 'standard':
