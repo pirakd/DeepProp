@@ -325,15 +325,38 @@ def get_normalization_constants(pairs_indexes, source_indexes, terminal_indexes,
 
 
 
-def train_test_split(n_samples, train_test_ratio, random_state:np.random.RandomState=None):
-    if random_state:
-        split = random_state.choice([0, 1, 2], n_samples, replace=True, p=train_test_ratio )
-    else:
-        split = np.random.choice([0, 1, 2], n_samples, replace=True, p=train_test_ratio, )
-    train_indexes = np.nonzero(split == 0)[0]
-    val_indexes = np.nonzero(split == 1)[0]
-    test_indexes = np.nonzero(split == 2)[0]
+def train_test_split(split_type ,n_samples, train_test_ratio,random_state:np.random.RandomState=None, directed_interactions=None, ):
+    if split_type == 'normal':
+        if random_state:
+            split = random_state.choice([0, 1, 2], n_samples, replace=True, p=train_test_ratio )
+        else:
+            split = np.random.choice([0, 1, 2], n_samples, replace=True, p=train_test_ratio, )
+        train_indexes = np.nonzero(split == 0)[0]
+        val_indexes = np.nonzero(split == 1)[0]
+        test_indexes = np.nonzero(split == 2)[0]
+    elif split_type == 'harsh':
 
+        interactions = np.array([list(directed_interactions[i]) for i in range(directed_interactions.shape[0])])
+        u_genes, _, _, u_gene_counts  = np.unique(interactions[:,0], return_index=True, return_inverse=True, return_counts=True)
+
+        sorted_indexes = np.argsort(u_gene_counts)[::-1]
+        sorted_counts = u_gene_counts[sorted_indexes]
+        sorted_u_genes = u_genes[sorted_indexes]
+
+        gene_count = np.array([0, 0, 0])
+        ratios = 1/(np.array(train_test_ratio)+1e-12)
+        gene_piles = [[],[],[]]
+        for i in range(len(sorted_counts)):
+            n_added_genes = sorted_counts[i]
+            pile_index_to_add = np.argmin((gene_count+n_added_genes)*ratios)
+            gene_piles[pile_index_to_add].append(sorted_u_genes[i])
+            gene_count[pile_index_to_add] += n_added_genes
+
+        train_indexes = np.concatenate([np.nonzero(interactions[:,0]== gene_id)[0] for gene_id in gene_piles[0]]) if len(gene_piles[0])!=0 else list()
+        val_indexes = np.concatenate([np.nonzero(interactions[:,0] == gene_id)[0] for gene_id in gene_piles[1]]) if len(gene_piles[1])!=0 else list()
+        test_indexes = np.concatenate([np.nonzero(interactions[:,0]== gene_id)[0] for gene_id in gene_piles[2]]) if len(gene_piles[2])!=0 else list()
+    else:
+        assert 0, '{} is not a valid split type'.format(split_type)
     return train_indexes, val_indexes, test_indexes
 
 
