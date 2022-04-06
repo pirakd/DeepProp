@@ -9,107 +9,105 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 from utils import read_data, generate_raw_propagation_scores,\
-    get_root_path, save_propagation_score, load_pickle, train_test_split, get_normalization_constants
+    get_root_path, save_propagation_score, load_pickle, train_test_split, gen_propagation_scores, get_time
 import torch
+from scripts.scripts_utils import sources_filenmae_dict, terminals_filenmae_dict
 import numpy as np
 from sklearn.metrics import precision_recall_curve, auc
-
+import argparse
 from D2D import generate_D2D_features_from_propagation_scores, eval_D2D, eval_D2D_2
-device = torch.device("cuda".format() if torch.cuda.is_available() else "cpu")
-output_folder = 'output'
-output_file_path = path.join(get_root_path(), output_folder)
-makedirs(output_file_path, exist_ok=True)
+from presets import experiments_20
 
-root_path = get_root_path()
-input_file = path.join(root_path, 'input')
-NETWORK_FILENAME = path.join(input_file, 'networks', "H_sapiens.net")
-DIRECTED_INTERACTIONS_FILENAME = path.join(input_file, 'directed_interactions', "KPI_dataset")
-SOURCES_FILENAME = path.join(input_file, 'priors', "mutations_AML")
-TERMINALS_FILENAME = path.join(input_file, 'priors', "gene_expression_AML")
-# torch.set_default_dtype(torch.float64)
-n_experiments = 551
-args = {
-    'data':
-        {'n_experiments': 'all',
-         'max_set_size': 500,
-         'train_test_split': 0.8,
-         'dataset_type': 'balanced_kpi',
-         'scores_filename': 'AML',
-         'random_seed': 0,
-         'load_prop_scores': True,
-         'save_prop_scores': False},
-    'propagation':
-        {'alpha': 0.8,
-         'eps': 1e-6,
-         'n_iterations': 200},
-    'model':
-        {'feature_extractor_layers': [64, 32, 16],
-         'classifier_layers': [128, 64],
-         'pulling_func': 'mean',
-         'exp_emb_size': 8},
-    'train':
-        {'intermediate_loss_weight': 0,
-         'intermediate_loss_type' : 'BCE',
-         'focal_gamma': 1,
-         'train_val_test_split': [0.8, 0, 0.2],
-         'test_batch_size': 32,
-         'train_batch_size': 32,
-         'n_epochs': 100,
-         'eval_interval': 10,
-         'learning_rate': 1e-3,
-         'max_evals_no_imp': 10 },}
+def run(sys_args):
+    output_folder = 'output'
+    output_file_path = path.join(get_root_path(), output_folder, path.basename(__file__).split('.')[0], get_time())
+    makedirs(output_file_path, exist_ok=True)
+    n_experiments = sys_args.n_experiments
+    args = experiments_20
 
-device = torch.device("cuda".format() if torch.cuda.is_available() else "cpu")
-cmd_args = [int(arg) for arg in sys.argv[1:]]
-if len(cmd_args) == 2:
-    args['data']['n_experiments'] = cmd_args[1]
-    device = torch.device("cuda:{}".format(cmd_args[0]) if torch.cuda.is_available() else "cpu")
-    print('n_expriments: {}, device: {}'.format(args['data']['n_experiments'], device))
-rng = np.random.RandomState(args['data']['random_seed'])
+    args['data']['load_prop_scores'] = sys_args.load_prop_scores
+    args['data']['save_prop_scores'] = sys_args.save_prop_scores
+    args['data']['prop_scores_filename'] = sys_args.prop_scores_filename
+    args['train']['train_val_test_split'] = sys_args.train_val_test_split
+    args['data']['directed_interactions_filename'] = sys_args.directed_interactions_filename
+    args['data']['sources_filename'] = sources_filenmae_dict[sys_args.experiments_type]
+    args['data']['terminals_filename'] = terminals_filenmae_dict[sys_args.experiments_type]
+    args['data']['n_experiments']  = n_experiments
+    rng = np.random.RandomState(args['data']['random_seed'])
 
-# data read
-network, directed_interactions, sources, terminals =\
-    read_data(NETWORK_FILENAME, DIRECTED_INTERACTIONS_FILENAME, SOURCES_FILENAME, TERMINALS_FILENAME,
-              args['data']['n_experiments'], args['data']['max_set_size'], rng)
+    # data read
+    network, directed_interactions, sources, terminals, id_to_degree =\
+        read_data(args['data']['network_filename'], args['data']['directed_interactions_filename'],
+                  args['data']['sources_filename'], args['data']['terminals_filename'],
+                  args['data']['n_experiments'], args['data']['max_set_size'], rng, translate_genes=False)
 
-directed_interactions_pairs_list = np.array(directed_interactions.index)
-genes_ids_to_keep = sorted(list(set([x for pair in directed_interactions_pairs_list for x in pair])))
+    directed_interactions_pairs_list = np.array(directed_interactions.index)
+    genes_ids_to_keep = sorted(list(set([x for pair in directed_interactions_pairs_list for x in pair])))
 
-if args['data']['load_prop_scores']:
-    scores_file_path = path.join(root_path, 'input', 'propagation_scores', args['data']['scores_filename'])
-    scores_dict = load_pickle(scores_file_path)
-    propagation_scores = scores_dict['propagation_scores']
-    row_id_to_idx, col_id_to_idx = scores_dict['row_id_to_idx'], scores_dict['col_id_to_idx']
-    normalization_constants_dict = scores_dict['normalization_constants']
-    sources_indexes = [[row_id_to_idx[id] for id in set] for set in sources.values()]
-    terminals_indexes = [[row_id_to_idx[id] for id in set] for set in terminals.values()]
+    propagation_scores, row_id_to_idx, col_id_to_idx, normalization_constants_dict = \
+        gen_propagation_scores(args, network, sources, terminals, genes_ids_to_keep, directed_interactions_pairs_list)
+
+    train_indexes, val_indexes, test_indexes = train_test_split(len(directed_interactions_pairs_list), args['train']['train_val_test_split'],
+                                                                random_state=rng)
+    train_indexes = np.sort(np.concatenate([train_indexes, val_indexes]))
+    sources_indexes = [[row_id_to_idx[gene_id] for gene_id in gene_set] for gene_set in sources.values()]
+    terminals_indexes = [[row_id_to_idx[gene_id] for gene_id in gene_set] for gene_set in terminals.values()]
     pairs_indexes = [(col_id_to_idx[pair[0]], col_id_to_idx[pair[1]]) for pair in directed_interactions_pairs_list]
-    assert scores_dict['data_args']['random_seed'] == args['data']['random_seed'], 'random seed of loaded data does not much current one'
-else:
-    propagation_scores, row_id_to_idx, col_id_to_idx = generate_raw_propagation_scores(network, sources, terminals, genes_ids_to_keep,
-                                                                  args['propagation']['alpha'], args['propagation']['n_iterations'],
-                                                                  args['propagation']['eps'])
-    sources_indexes = [[row_id_to_idx[id] for id in set] for set in sources.values()]
-    terminals_indexes = [[row_id_to_idx[id] for id in set] for set in terminals.values()]
-    pairs_indexes = [(col_id_to_idx[pair[0]], col_id_to_idx[pair[1]]) for pair in directed_interactions_pairs_list]
-    normalization_constants_dict = get_normalization_constants(pairs_indexes, sources_indexes, terminals_indexes,
-                                                               propagation_scores)
-    if args['data']['save_prop_scores']:
-        save_propagation_score(propagation_scores, normalization_constants_dict, row_id_to_idx, col_id_to_idx,
-                               args['propagation'], args['data'], args['data']['scores_filename'])
 
+    features, deconstructed_features = generate_D2D_features_from_propagation_scores(propagation_scores, pairs_indexes, sources_indexes, terminals_indexes)
+    directed_interactions_source_type = np.array(directed_interactions.source)
 
-a=1
-train_indexes, val_indexes, test_indexes = train_test_split(len(directed_interactions_pairs_list), args['train']['train_val_test_split'],
-                                                            random_state=rng)
+    d2d_results_dict = eval_D2D(features[train_indexes], features[test_indexes])
+    d2d_precision, d2d_recall, d2d_thresholds = precision_recall_curve(d2d_results_dict['overall']['labels'], d2d_results_dict['overall']['probs'][:, 1])
+    d2d_auc = auc(d2d_recall, d2d_precision)
 
-features, deconstructed_features= generate_D2D_features_from_propagation_scores(propagation_scores, pairs_indexes, sources_indexes, terminals_indexes)
-d2d_probs, d2d_labels = eval_D2D(features[train_indexes], features[test_indexes])
-d2d_precision, d2d_recall, d2d_thresholds = precision_recall_curve(d2d_labels, d2d_probs[:, 1])
-d2d_auc = auc(d2d_recall, d2d_precision)
+    d2d_2_results_dict = eval_D2D_2(deconstructed_features[train_indexes], deconstructed_features[test_indexes])
+    d2d_precision_2, d2d_recall_2, d2d_thresholds_2 = precision_recall_curve(d2d_2_results_dict['overall']['labels'], d2d_2_results_dict['overall']['probs'][:, 1])
+    d2d_auc_2 = auc(d2d_recall_2, d2d_precision_2)
 
-d2d_probs_2, d2d_labels_2 = eval_D2D_2(deconstructed_features[train_indexes], deconstructed_features[test_indexes])
-d2d_precision_2, d2d_recall_2, d2d_thresholds_2 = precision_recall_curve(d2d_labels_2, d2d_probs_2[:, 1])
-d2d_auc_2 = auc(d2d_recall_2, d2d_precision_2)
+    d2d_probs, d2d_probs_2 = np.array(d2d_2_results_dict['overall']['probs']), np.array(d2d_2_results_dict['overall']['probs'])
+    d2d_labels, d2d_labels_2 = np.array(d2d_results_dict['overall']['labels']), np.array(d2d_2_results_dict['overall']['labels'])
 
-print('D2D: {:.4f}, D2D_2:{:.4f}'.format(d2d_auc, d2d_auc_2))
+    results_by_source_type = {}
+    unique_source_type = np.unique(directed_interactions_source_type)
+    for source_type in unique_source_type:
+        doubled_test_indexes = np.concatenate([test_indexes, test_indexes])
+        type_d2d_probs = d2d_probs[directed_interactions_source_type[doubled_test_indexes] == source_type][:, 1]
+        type_labels = d2d_labels[directed_interactions_source_type[doubled_test_indexes] == source_type]
+        type_d2d_precision, type_d2d_recall, type_d2d_thresholds = precision_recall_curve(type_labels, type_d2d_probs)
+        type_d2d_auc = auc(type_d2d_recall, type_d2d_precision)
+
+        type_d2d_probs_2 = d2d_probs_2[directed_interactions_source_type[doubled_test_indexes] == source_type][:, 1]
+        type_labels_2 = d2d_labels_2[directed_interactions_source_type[doubled_test_indexes] == source_type]
+        type_d2d_precision_2, type_d2d_recall_2, type_d2d_thresholds_2 = precision_recall_curve(type_labels_2, type_d2d_probs_2)
+        type_d2d_auc_2 = auc(type_d2d_recall_2, type_d2d_precision_2)
+        results_by_source_type[source_type] = {'d2d_auc': type_d2d_auc, 'd2d_reconstructed': type_d2d_auc_2}
+    print('D2D: {:.4f}, D2D_2:{:.4f}'.format(d2d_auc, d2d_auc_2))
+
+if __name__ == '__main__':
+    input_type = 'yeast'
+    load_prop = False
+    save_prop = False
+    n_exp = 20
+    split = [0.66, 0.14, 0.2]
+    interaction_type = ['yeast_KPI']
+    # interaction_type = ['STKE']
+    device = 'cpu'
+    prop_scores_filename = 'yeast_KPI'
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-ex', '--ex_type', dest='experiments_type', type=str, help='name of experiment type(drug, colon, etc.)', default=input_type)
+    parser.add_argument('-n,', '--n_exp', dest='n_experiments', type=int, help='num of experiments used (0 for all)', default=n_exp)
+    parser.add_argument('-s', '--save_prop', dest='save_prop_scores',  action='store_true', default=False, help='Whether to save propagation scores')
+    parser.add_argument('-l', '--load_prop', dest='load_prop_scores',  action='store_true', default=False, help='Whether to load prop scores')
+    parser.add_argument('-sp', '--split', dest='train_val_test_split',  nargs=3, help='[train, val, test] sums to 1', default=split, type=float)
+    parser.add_argument('-d', '--device', type=str, help='cpu or gpu number',  default=device)
+    parser.add_argument('-in', '--inter_file', dest='directed_interactions_filename', nargs='*', type=str,
+                        help='KPI/STKE', default=interaction_type)
+    parser.add_argument('-p', '--prop_file', dest='prop_scores_filename', type=str,
+                        help='Name of prop score file(save/load)', default=prop_scores_filename)
+
+    args = parser.parse_args()
+    # args.load_prop_scores = True
+    # args.save_prop_scores = True
+    run(args)

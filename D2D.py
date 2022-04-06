@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn import linear_model
 from sklearn.metrics import precision_recall_curve, auc
-
+import copy
 
 def generate_D2D_features_from_propagation_scores(propagation_scores, pairs_indexes, source_indexes, terminal_indexes):
     """
@@ -66,7 +66,8 @@ def generate_D2D_features_2(source_features, terminal_featues):
 
     return features
 
-def eval_D2D(train_features, test_features):
+def eval_D2D(train_features, test_features, source_types=None):
+
 
     inverse_train_features = 1 / train_features
     inverse_test_features = 1/test_features
@@ -82,13 +83,28 @@ def eval_D2D(train_features, test_features):
     quantized_test_features = np.argsort(np.argsort(test_features, axis=1), axis=1)
 
     clf = linear_model.LogisticRegression(solver='liblinear',  penalty='l1', C=0.0001)
+    clf = linear_model.LogisticRegression(solver='liblinear')
     probs = clf.fit(quantized_train_features, train_labels).predict_proba(quantized_test_features)
     acc = np.mean(np.argmax(probs, 1) == test_labels)
     precision, recall, thresholds = precision_recall_curve(test_labels, probs[:, 1])
     mean_auc = auc(recall, precision)
-    return probs,  test_labels
 
-def eval_D2D_2(train_features, test_features):
+    type_output_dict = {'probs': [], 'labels': []}
+    results_by_source_type = {}
+    results_by_source_type['overall'] = copy.deepcopy(type_output_dict)
+    results_by_source_type['overall']['probs'] = probs
+    results_by_source_type['overall']['labels'] = test_labels
+    if source_types is not None:
+        unique_source_types = np.unique(source_types)
+        source_types = np.concatenate([source_types, source_types])
+        for source_type in unique_source_types:
+            results_by_source_type[source_type] = copy.deepcopy(type_output_dict)
+            results_by_source_type[source_type]['probs'] = probs[source_types == source_type]
+            results_by_source_type[source_type]['labels'] = test_labels[source_types == source_type]
+
+    return results_by_source_type
+
+def eval_D2D_2(train_features, test_features, source_types=None):
 
     inverse_idx = np.ravel([np.array([2, 3, 0, 1]) + 4*i for i in range(int(train_features.shape[1]//4))])
     inverse_train_features = train_features[: , inverse_idx]
@@ -104,9 +120,25 @@ def eval_D2D_2(train_features, test_features):
     quantized_train_features = np.argsort(np.argsort(train_features, axis=1), axis=1)
     quantized_test_features = np.argsort(np.argsort(test_features, axis=1), axis=1)
 
-    clf = linear_model.LogisticRegression(solver='liblinear', penalty='l1', C=0.0001)
+    # clf = linear_model.LogisticRegression(solver='liblinear', penalty='l1', C=0.0001)
+    clf = linear_model.LogisticRegression(solver='liblinear')
     probs = clf.fit(quantized_train_features, train_labels).predict_proba(quantized_test_features)
     acc = np.mean(np.argmax(probs, 1) == test_labels)
     precision, recall, thresholds = precision_recall_curve(test_labels, probs[:, 1])
     mean_auc = auc(recall, precision)
-    return probs, test_labels
+
+
+    type_output_dict = {'probs': [], 'labels': []}
+    results_by_source_type = {}
+    results_by_source_type['overall'] = copy.deepcopy(type_output_dict)
+    results_by_source_type['overall']['probs'] = probs
+    results_by_source_type['overall']['labels'] = test_labels
+    if source_types is not None:
+        unique_source_types = np.unique(source_types)
+        source_types = np.concatenate([source_types, source_types])
+        for source_type in unique_source_types:
+            results_by_source_type[source_type] = copy.deepcopy(type_output_dict)
+            results_by_source_type[source_type]['probs'] = probs[source_types == source_type]
+            results_by_source_type[source_type]['labels'] = test_labels[source_types == source_type]
+
+    return results_by_source_type
