@@ -83,7 +83,7 @@ class LightDataset(Dataset):
     def __getitem__(self, idx):
         if type(idx) == torch.Tensor:
             idx = idx.item()
-        neg_flag = idx > len(self.pairs_indexes)
+        neg_flag = idx >= len(self.pairs_indexes)
         idx = np.mod(idx, len(self.pairs_indexes))
         label = 0 if neg_flag else 1
         pair = self.pairs_indexes[idx]
