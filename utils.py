@@ -53,14 +53,18 @@ def read_directed_interactions(directed_interactions_folder, directed_interactio
         not_self_edge = directed_interactions['from'].ne(directed_interactions['to'])
         genes = pd.unique(directed_interactions[['from', 'to']].values.ravel())
 
-        if isinstance( directed_interactions['from'][0], str): # if genes in symbol format
-            translation_dict = gene_translator.translate(genes, 'symbol', 'entrez_id')
-        else: # if genes in entrez id format
-            translation_dict = gene_translator.translate(genes, 'entrez_id', 'entrez_id')
+        if gene_translator is not None:
+            if isinstance( directed_interactions['from'][0], str): # if genes in symbol format
+                translation_dict = gene_translator.translate(genes, 'symbol', 'entrez_id')
+            else: # if genes in entrez id format
+                translation_dict = gene_translator.translate(genes, 'entrez_id', 'entrez_id')
 
-        has_translation = directed_interactions['from'].isin(translation_dict) & directed_interactions['to'].isin(translation_dict)
+            has_translation = directed_interactions['from'].isin(translation_dict) & directed_interactions['to'].isin(translation_dict)
+        else:
+            has_translation = np.ones_like(not_self_edge)
         directed_interactions = directed_interactions[has_translation & not_self_edge]
-        directed_interactions.replace(translation_dict, inplace=True)
+        if gene_translator is not None:
+            directed_interactions.replace(translation_dict, inplace=True)
 
         all_interactions = pd.concat((all_interactions, directed_interactions))
 
@@ -89,7 +93,8 @@ def read_priors(sources_filename, terminals_filename, translator=None):
     return source_priors, terminal_priors
 
 
-def read_data(network_filename, directed_interaction_filename, sources_filename, terminals_filename, n_exp, max_set_size, rng):
+def read_data(network_filename, directed_interaction_filename, sources_filename, terminals_filename, n_exp,
+              max_set_size, rng, translate_genes=True):
     # set paths
     root_path = get_root_path()
     input_file = path.join(root_path, 'input')
@@ -99,9 +104,12 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     terminals_file_path = path.join(input_file, 'priors', terminals_filename)
 
     # load gene translator
-    from gene_name_translator.gene_translator import GeneTranslator
-    translator = GeneTranslator(verbosity=False)
-    translator.load_dictionary()
+    if translate_genes:
+        from gene_name_translator.gene_translator import GeneTranslator
+        translator = GeneTranslator(verbosity=False)
+        translator.load_dictionary()
+    else:
+        translator=None
 
     # do all the reading stuff
     network = read_network(network_file_path, translator)
@@ -139,7 +147,7 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     return merged_network, directed_interactions, sources, terminals, id_to_degree
 
 
-def gen_propagation_scores(args, network, sources, terminals, genes_ids_to_keep, directed_interactions_pairs_list):
+def gen_propagation_scores(args, network, sources, terminals, genes_ids_to_keep, directed_interactions_pairs_list, calc_normalization_constants=True):
     root_path = get_root_path()
     if args['data']['load_prop_scores']:
         scores_file_path = path.join(root_path, 'input', 'propagation_scores', args['data']['prop_scores_filename'])
@@ -155,8 +163,11 @@ def gen_propagation_scores(args, network, sources, terminals, genes_ids_to_keep,
         sources_indexes = [[row_id_to_idx[id] for id in set] for set in sources.values()]
         terminals_indexes = [[row_id_to_idx[id] for id in set] for set in terminals.values()]
         pairs_indexes = [(col_id_to_idx[pair[0]], col_id_to_idx[pair[1]]) for pair in directed_interactions_pairs_list]
-        normalization_constants_dict = get_normalization_constants(pairs_indexes, sources_indexes, terminals_indexes,
-                                                                   propagation_scores, args['data']['normalization_method'])
+        if calc_normalization_constants:
+            normalization_constants_dict = get_normalization_constants(pairs_indexes, sources_indexes, terminals_indexes,
+                                                                       propagation_scores, args['data']['normalization_method'])
+        else:
+            normalization_constants_dict = None
         if args['data']['save_prop_scores']:
             save_propagation_score(propagation_scores, normalization_constants_dict, row_id_to_idx, col_id_to_idx,
                                    args['propagation'], args['data'],  args['data']['prop_scores_filename'])
@@ -222,17 +233,19 @@ def generate_raw_propagation_scores(network, sources, terminals, genes_ids_to_ke
     all_source_terminal_genes = sorted(list(set.union(set.union(*sources.values()), set.union(*terminals.values()))))
     gene_id_to_idx, matrix, num_genes = generate_propagate_data(network, propagate_alpha)
     gene_idx_to_id = {xx:x for x,xx in gene_id_to_idx.items()}
-    genes_idxs_to_keep = [gene_id_to_idx[id] for id in genes_ids_to_keep]
 
     propagation_scores = np.array([propagate([s], matrix, gene_id_to_idx, num_genes, propagate_alpha, propagate_iterations,
                                         propagation_epsilon) for s in tqdm(all_source_terminal_genes,
                                                                            desc='propagating scores',
                                                                            total=len(all_source_terminal_genes))])
+    if genes_ids_to_keep:
+        genes_idxs_to_keep = [gene_id_to_idx[id] for id in genes_ids_to_keep]
+        propagation_scores = propagation_scores[:, genes_idxs_to_keep]
+        col_id_to_idx = {gene_idx_to_id[idx]: i for i,idx in enumerate(genes_idxs_to_keep)}
+    else:
+        col_id_to_idx = {xx:x for x,xx in gene_idx_to_id.items()}
 
-    propagation_scores = propagation_scores[:, genes_idxs_to_keep]
-    col_id_to_idx = {gene_idx_to_id[idx]: i for i,idx in enumerate(genes_idxs_to_keep)}
     row_id_to_idx = {id:i for i, id in enumerate(all_source_terminal_genes)}
-
     return propagation_scores, row_id_to_idx, col_id_to_idx
 
 
@@ -300,7 +313,7 @@ def get_power_transform_lambda(pairs_indexes, source_indexes, terminal_indexes, 
     transformed = pt.fit_transform(sampled_elements[:, np.newaxis])
     mean = np.mean(transformed)
     std = np.std(transformed)
-    return {'lambda':pt.lambdas_[0], 'mean': mean, 'std':std}
+    return {'lmbda':pt.lambdas_[0], 'mean': mean, 'std':std}
 
 def get_normalization_constants(pairs_indexes, source_indexes, terminal_indexes, propagation_scores, normalization_method):
     if normalization_method == 'standard':
@@ -337,7 +350,7 @@ def get_pulling_func(pulling_func_name):
 
 def get_loss_function(loss_name, **kwargs):
     if loss_name == 'BCE':
-        return torch.nn.BCEWithLogitsLoss()
+        return torch.nn.BCEWithLogitsLoss(reduction='sum')
     elif loss_name == 'FOCAL':
         return FocalLoss(gamma=kwargs['focal_gamma'])
     else:
@@ -358,7 +371,7 @@ def log_results(output_path, args, results_dict, model=None):
     with open(path.join(output_path, 'args'), 'w') as f:
         json.dump(args, f, indent=4, separators=(',', ': '))
     if model:
-        save_model(path.join(output_path, 'models'), model)
+        save_model(path.join(output_path, 'model'), model)
 
 
 def save_propagation_score(propagation_scores, normalization_constants,

@@ -1,3 +1,14 @@
+
+
+# direct interactions
+
+# set a threshold
+
+# flip direction
+
+# evaluate
+
+import pandas as pd
 from os import path
 import sys
 sys.path.append(path.dirname(path.dirname(path.realpath(__file__))))
@@ -12,6 +23,7 @@ import torch
 import numpy as np
 import json
 import argparse
+import copy
 
 def run(sys_args):
     root_path = get_root_path()
@@ -19,8 +31,8 @@ def run(sys_args):
     output_file_path = path.join(get_root_path(), output_folder, path.basename(__file__).split('.')[0], get_time())
     makedirs(output_file_path, exist_ok=True)
     model_args_path = path.join(root_path, 'input', 'models', sys_args.model_name, 'args')
-    model_path = path.join(root_path, 'input', 'models', sys_args.model_name, 'model')
     model_results_path = path.join(root_path, 'input', 'models', sys_args.model_name, 'results')
+    model_path = path.join(root_path, 'input', 'models', sys_args.model_name, 'model')
 
     with open(model_args_path, 'r') as f:
         args = json.load(f)
@@ -30,7 +42,6 @@ def run(sys_args):
     device = torch.device("cuda:{}".format(sys_args.device) if torch.cuda.is_available() else "cpu")
     train_dataset = args['data']['directed_interactions_filename']
     args['data']['load_prop_scores'] = sys_args.load_prop_scores
-    args['data']['n_experiments'] = 0
     args['data']['save_prop_scores'] = sys_args.save_prop_scores
     args['data']['prop_scores_filename'] = sys_args.prop_scores_filename
     args['train']['train_val_test_split'] = sys_args.train_val_test_split
@@ -42,13 +53,18 @@ def run(sys_args):
     network, directed_interactions, sources, terminals, id_to_degree =\
         read_data(args['data']['network_filename'], args['data']['directed_interactions_filename'],
                   args['data']['sources_filename'], args['data']['terminals_filename'],
-                  args['data']['n_experiments'], args['data']['max_set_size'], rng)
+                  args['data']['n_experiments'], args['data']['max_set_size'], rng, translate_genes=False)
 
+    # random_indexes = np.random.choice(len(network.index), 100)
+    directed_interactions_pairs_list  = np.array(list(network.index))
     n_experiments = len(sources.keys())
-    directed_interactions_pairs_list = np.array(directed_interactions.index)
-    directed_interactions_source_type = np.array(directed_interactions.source)
+    directed_interactions_source_type = np.array(['yeast_KPI' for x in range(len(directed_interactions_pairs_list))])
+
+    # genes_ids_to_keep =/
     genes_ids_to_keep = sorted(list(set([x for pair in directed_interactions_pairs_list for x in pair])))
 
+
+    # here we have to propagate all genes
     propagation_scores, row_id_to_idx, col_id_to_idx, _ = \
         gen_propagation_scores(args, network, sources, terminals, genes_ids_to_keep, directed_interactions_pairs_list, calc_normalization_constants=False)
 
@@ -61,33 +77,51 @@ def run(sys_args):
                                 degree_feature_normalization_constants= normalization_constants_dicts['degrees'],
                                 pairs_source_type=directed_interactions_source_type[test_indexes],
                                 id_to_degree=id_to_degree, train=False)
-    test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=False, )
+    test_loader = DataLoader(test_dataset, batch_size=200, shuffle=False, pin_memory=False, )
     intermediate_loss_type = get_loss_function(args['train']['intermediate_loss_type'],
                                                focal_gamma=args['train']['focal_gamma'])
     trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyLoss(), intermediate_criteria=intermediate_loss_type,
                                 intermediate_loss_weight=args['train']['intermediate_loss_weight'],
                                 optimizer=None, eval_metric=None, eval_interval=args['train']['eval_interval'], device='cpu')
 
-    test_loss, test_intermediate_loss, test_classifier_loss, test_acc, test_auc, precision, recall = \
-        trainer.eval(model, test_loader)
-    print('Test PR-AUC: {:.2f}'.format(test_auc))
-    test_stats = {'test_loss': test_loss, 'best_acc': test_acc, 'best_auc': test_auc,
-                  'test_intermediate_loss': test_intermediate_loss, 'test_classifier_loss': test_classifier_loss}
+    # check prediction on trained samples
+    # trained_interaction = np.array(list(directed_interactions.index))
+    # trained_interaction_source_type = np.array(['yeast_KPI' for x in range(len(trained_interaction))])
+    # sanity_dataset =  LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores,
+    #                         trained_interaction, sources,
+    #                         terminals, args['data']['normalization_method'],
+    #                         samples_normalization_constants=normalization_constants_dicts['samples'],
+    #                         degree_feature_normalization_constants= normalization_constants_dicts['degrees'],
+    #                         pairs_source_type=trained_interaction_source_type,
+    #                         id_to_degree=id_to_degree, train=False)
+    # sanity_loader = DataLoader(sanity_dataset, batch_size=200, shuffle=False, pin_memory=False, )
+    # results = trainer.predict(model, sanity_loader)
 
-    results_dict = {'test_stats': test_stats, 'n_experiments': n_experiments, 'train_dataset':train_dataset,
-                    'test_dataset':args['data']['directed_interactions_filename'], 'model_path': model_path}
-    log_results(output_file_path,  args, results_dict)
+    results = trainer.predict(model, test_loader)
+
+    # turn predictions to a dict
+    col_idx_to_id = {xx: x for x,xx in col_id_to_idx.items()}
+    directed_edge_prob = {tuple([col_idx_to_id[idx] for idx in tuple(results[1][i,:])]) : results[0][i,1] for i in range(results[0].shape[0])}
+    # duplicate network
+
+    network.pop('source')
+    network_reverse = copy.deepcopy(network)
+    reverse_indexes = np.array([[x[1], x[0]] for x in list(network.index)])
+    network_reverse.index = pd.MultiIndex.from_arrays([reverse_indexes[:, 0], reverse_indexes[:, 1]])
+    directed_network = pd.concat([network, network_reverse])
+    directed_network['prob'] = [directed_edge_prob.get((x[0],x[1]), 0) for x in list(directed_network.index)]
+    # network_reverse.index(reverse_indexess)
 
 
 if __name__ == '__main__':
-    model_name = 'drug_all'
+    model_name = 'yeast_KPI'
     load_prop = True
     save_prop = False
-    n_exp = 0
+    n_exp = 5
     split = [0, 0, 1]
-    interaction_type = 'KPI'
+    interaction_type = 'yeast_KPI'
     device = 'cpu'
-    prop_scores_filename = 'drug_KPI'
+    prop_scores_filename = 'yeast_KPI_direct'
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-m,', '--model_name', type=str, help='name of saved model folder in input/models', default=model_name)
@@ -100,6 +134,8 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--prop_file', dest='prop_scores_filename', type=str,
                         help='Name of prop score file(save/load)', default=prop_scores_filename)
 
-    args = parser.parse_args()
+    sys_args = parser.parse_args()
+    # sys_args.load_prop_scores =  True
+    # sys_args.save_prop_scores =  True
 
-    run(args)
+    run(sys_args)

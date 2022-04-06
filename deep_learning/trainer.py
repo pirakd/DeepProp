@@ -4,6 +4,8 @@ from sklearn.metrics import roc_curve, auc
 from sklearn.metrics import precision_recall_curve
 from torch import Tensor
 import copy
+from tqdm import tqdm
+
 
 class Trainer():
     def __init__(self, n_epochs, criteria, optimizer, eval_metric,  eval_interval=1,  device='cpu', verbose=3, early_stop=None):
@@ -14,10 +16,8 @@ class Trainer():
         self.device = device
         self.eval_interval = eval_interval
 
-
     def train(self, train_loader, eval_loader, model):
         raise NotImplemented
-
 
     def train_single_epoch(self, model, train_loader):
         raise NotImplemented
@@ -39,7 +39,6 @@ class ClassifierTrainer(Trainer):
         else:
             self.intermediate_loss_weight = None
 
-
     def train(self, train_loader, eval_loader, model, max_evals_no_improvement=8):
         best_model = None
         self.losses = {'train': [], 'validation': []}
@@ -50,7 +49,8 @@ class ClassifierTrainer(Trainer):
         n_samples_per_epoch = len(train_loader.dataset)
 
         for epoch in range(self.n_epochs):
-            epoch_loss, epoch_intermediate_loss, epoch_classifier_loss, epoch_hits = self.train_single_epoch(model, train_loader)
+            epoch_loss, epoch_intermediate_loss, epoch_classifier_loss, epoch_hits =\
+                self.train_single_epoch(model,train_loader)
             self.losses['train'].append(epoch_loss/(n_samples_per_epoch))
             self.metrics['train'].append(epoch_hits/n_samples_per_epoch)
             print('epoch {}, train_loss: {:.2e}, classifier_loss: {:.2e}, intermediate_loss:{:.2e} train_acc:{:.2f}'
@@ -58,11 +58,13 @@ class ClassifierTrainer(Trainer):
                           epoch_intermediate_loss/n_samples_per_epoch,  epoch_hits/n_samples_per_epoch))
 
             if (np.mod(epoch, self.eval_interval) == 0 and epoch) or (epoch+1 == self.n_epochs):
-                avg_eval_loss, avg_eval_intermediate_loss, avg_eval_classifier_loss, eval_acc, eval_auc, _, _ = self.eval(model, eval_loader)
+                avg_eval_loss, avg_eval_intermediate_loss, avg_eval_classifier_loss, eval_acc, eval_auc, _, _ = \
+                    self.eval(model, eval_loader)
 
                 self.losses['validation'].append(avg_eval_loss)
                 self.metrics['validation'].append(eval_acc)
-                print('epoch {}, validation loss:{:.2e}, validation classifier loss: {:.2e}, validation intermediate loss: {:.2e}, validation acc: {:.2f}, validation auc: {:.2f}'
+                print('epoch {}, validation loss:{:.2e}, validation classifier loss:'
+                      ' {:.2e}, validation intermediate loss: {:.2e}, validation acc: {:.2f}, validation auc: {:.2f}'
                       .format(epoch, avg_eval_loss, avg_eval_classifier_loss, avg_eval_intermediate_loss,
                               eval_acc, eval_auc))
 
@@ -131,12 +133,15 @@ class ClassifierTrainer(Trainer):
         all_labels = []
         model.eval()
         with torch.no_grad():
-            for eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_batch, eval_pair_source_type_batch, eval_pair_degree_batch in eval_loader:
+            for eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_batch, \
+                eval_pair_source_type_batch, eval_pair_degree_batch in eval_loader:
                 if self.device != 'cpu':
                     eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_degree_batch =\
-                        (x.to(self.device) for x in[eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_degree_batch])
+                        (x.to(self.device) for x in[eval_source_batch, eval_terminal_batch, eval_labels_batch,
+                                                    eval_pair_degree_batch])
                 if torch.get_default_dtype() is torch.float32:
-                    eval_source_batch, eval_terminal_batch, eval_pair_degree_batch = eval_source_batch.float(), eval_terminal_batch.float(), eval_pair_degree_batch.float()
+                    eval_source_batch, eval_terminal_batch, eval_pair_degree_batch =\
+                        eval_source_batch.float(), eval_terminal_batch.float(), eval_pair_degree_batch.float()
 
                 out, pred, pre_pred = model(eval_source_batch, eval_terminal_batch, eval_pair_degree_batch)
 
@@ -177,24 +182,27 @@ class ClassifierTrainer(Trainer):
 
         all_outs = []
         all_pairs = []
+        n_batches = int(len(eval_loader.dataset) // eval_loader.batch_size + 1)
         model.eval()
         with torch.no_grad():
-            for eval_source_batch, eval_terminal_batch, _, eval_pair_batch, eval_pair_source_type_batch in eval_loader:
+            for eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_batch,\
+                eval_pair_source_type_batch, eval_pair_degree_batch in\
+                    tqdm(eval_loader, desc='Predicting edges direction' ,total=n_batches ):
                 if self.device != 'cpu':
-                    eval_source_batch, eval_terminal_batch =\
-                        (x.to(self.device) for x in[eval_source_batch, eval_terminal_batch])
+                    eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_degree_batch =\
+                        (x.to(self.device) for x in[eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_degree_batch])
                 if torch.get_default_dtype() is torch.float32:
-                    eval_source_batch, eval_terminal_batch, = eval_source_batch.float(), eval_terminal_batch.float()
+                    eval_source_batch, eval_terminal_batch, eval_pair_degree_batch =\
+                        eval_source_batch.float(), eval_terminal_batch.float(), eval_pair_degree_batch.float()
+                out, pred, pre_pred = model(eval_source_batch, eval_terminal_batch, eval_pair_degree_batch)
 
-                out, pred, pre_pred = model(eval_source_batch, eval_terminal_batch)
                 all_outs.append(out.cpu().detach().numpy())
                 all_pairs.append(torch.stack(eval_pair_batch).detach().cpu().numpy())
 
             all_probs = torch.nn.functional.softmax(torch.squeeze(Tensor(np.concatenate(all_outs, 0))), dim=1).numpy()
             all_pairs = np.hstack(all_pairs).T
-
-        return all_probs, all_pairs
-
+            all_pairs = np.array([[eval_loader.dataset.col_idx_to_id[x] for x in pair] for pair in all_pairs])
+        return {'probs':all_probs, 'pairs':all_pairs}
 
     def eval_by_source(self, model, eval_loader, output_probs= False, by_source_type=False):
         type_output_dict = {'probs': [], 'labels': [], 'intermediate_loss': 0, 'classifier_loss': 0, 'loss': 0, 'hits': 0}
@@ -206,12 +214,15 @@ class ClassifierTrainer(Trainer):
 
         model.eval()
         with torch.no_grad():
-            for eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_batch, eval_pair_source_type_batch, eval_pair_degree_batch in eval_loader:
+            for eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_batch,\
+                eval_pair_source_type_batch, eval_pair_degree_batch in eval_loader:
                 if self.device != 'cpu':
                     eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_degree_batch =\
-                        (x.to(self.device) for x in[eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_degree_batch])
+                        (x.to(self.device) for x in[eval_source_batch, eval_terminal_batch, eval_labels_batch,
+                                                    eval_pair_degree_batch])
                 if torch.get_default_dtype() is torch.float32:
-                    eval_source_batch, eval_terminal_batch, eval_pair_degree_batch = eval_source_batch.float(), eval_terminal_batch.float(), eval_pair_degree_batch.float()
+                    eval_source_batch, eval_terminal_batch, eval_pair_degree_batch =\
+                        eval_source_batch.float(), eval_terminal_batch.float(), eval_pair_degree_batch.float()
 
                 unique_types = np.unique(eval_pair_source_type_batch)
                 for unique_type in unique_types:
@@ -224,7 +235,7 @@ class ClassifierTrainer(Trainer):
 
                     classifier_loss = self.criteria(out, type_labels)
                     if self.intermediate_loss_weight:
-                        eval_intermediate_loss = self.intermediate_criteria(torch.squeeze(pre_pred),
+                        eval_intermediate_loss = self.intermediate_criteria(torch.squeeze(pre_pred, dim=1),
                                                 torch.repeat_interleave(type_labels, model.n_experiments).to(torch.get_default_dtype()))
 
                         loss = ((1-self.intermediate_loss_weight) * classifier_loss) +\
@@ -250,8 +261,10 @@ class ClassifierTrainer(Trainer):
                     output_per_type_dict['overall']['labels'].append(type_labels)
 
             for unique_type in output_per_type_dict.keys():
-                output_per_type_dict[unique_type]['probs'] = torch.nn.functional.softmax(torch.squeeze(Tensor(np.concatenate(output_per_type_dict[unique_type]['probs'], 0))), dim=1)
-                output_per_type_dict[unique_type]['labels'] = torch.squeeze(torch.cat(output_per_type_dict[unique_type]['labels'])).cpu().detach().numpy()
+                output_per_type_dict[unique_type]['probs'] =\
+                    torch.nn.functional.softmax(torch.squeeze(Tensor(np.concatenate(output_per_type_dict[unique_type]['probs'], 0))), dim=1)
+                output_per_type_dict[unique_type]['labels'] =\
+                    torch.squeeze(torch.cat(output_per_type_dict[unique_type]['labels'])).cpu().detach().numpy()
 
         if output_probs:
             return output_per_type_dict

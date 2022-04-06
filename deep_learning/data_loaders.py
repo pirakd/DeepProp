@@ -59,9 +59,12 @@ class ClassifierDataset(Dataset):
 
 class LightDataset(Dataset):
     def __init__(self, row_id_to_idx, col_id_to_idx, propagation_scores, directed_pairs_list,
-                 sources, terminals, normalization_method, normalization_constants, pairs_source_type=None, id_to_degree=None):
+                 sources, terminals, normalization_method, samples_normalization_constants,
+                 degree_feature_normalization_constants=None,
+                 pairs_source_type=None, id_to_degree=None, train=True):
         self.row_id_to_idx = row_id_to_idx
         self.col_id_to_idx = col_id_to_idx
+        self.col_idx_to_id = {xx: x for x, xx in self.col_id_to_idx.items()}
         self.propagation_scores = propagation_scores
         self.source_indexes = self.get_experiment_indexes(sources)
         self.terminal_indexes = self.get_experiment_indexes(terminals)
@@ -69,11 +72,11 @@ class LightDataset(Dataset):
         self.longest_source = np.max([len(source) for source in sources.values()])
         self.longest_terminal = np.max([len(terminal) for terminal in terminals.values()])
         normalizer = self.get_normalization_method(normalization_method)
-        self.normalizer = normalizer(normalization_constants)
+        self.normalizer = normalizer(samples_normalization_constants)
         self.pairs_source_type = pairs_source_type
         self.idx_to_degree = {self.col_id_to_idx[id]: degree for id, degree in id_to_degree.items() if id in self.col_id_to_idx}
-        self.degree_normalizer = self.get_degree_normalizar()
-
+        self.degree_normalizer = self.get_degree_normalizar(degree_feature_normalization_constants)
+        self.train = train
     def __len__(self):
         return len(self.pairs_indexes) * 2
 
@@ -118,17 +121,23 @@ class LightDataset(Dataset):
         else:
             assert 0, '{} is not a valid normalization method name'.format(normalization_method)
 
-    def get_degree_normalizar(self):
-        all_degrees = []
-        for pair in self.pairs_indexes:
-            all_degrees.append(self.idx_to_degree[pair[0]])
-            all_degrees.append(self.idx_to_degree[pair[1]])
-        all_degrees = np.array(all_degrees)[:, np.newaxis]
-        pt = PowerTransformer(method='box-cox', standardize=False)
-        transformed = pt.fit_transform(all_degrees)
-        mean = np.mean(transformed)
-        std = np.std(transformed)
-        return PowerNormalizer({'lambda': pt.lambdas_[0], 'mean': mean, 'std': std})
+    def get_degree_normalizar(self, normalization_constants):
+        if normalization_constants is None:
+            all_degrees = []
+            for pair in self.pairs_indexes:
+                all_degrees.append(self.idx_to_degree[pair[0]])
+                all_degrees.append(self.idx_to_degree[pair[1]])
+            all_degrees = np.array(all_degrees)[:, np.newaxis]
+            pt = PowerTransformer(method='box-cox', standardize=False)
+            transformed = pt.fit_transform(all_degrees)
+            mean = np.mean(transformed)
+            std = np.std(transformed)
+            lmbda = pt.lambdas_[0]
+        else:
+            mean = normalization_constants['mean']
+            std = normalization_constants['std']
+            lmbda = normalization_constants['lmbda']
+        return PowerNormalizer({'lmbda': lmbda, 'mean': mean, 'std': std})
 
 class StandardNormalizer():
     def __init__(self, normalization_constants):
@@ -146,8 +155,8 @@ class PowerNormalizer:
     def __init__(self, normalization_constants):
         from scipy.stats import yeojohnson
         from functools import partial
-        self.transformer = partial(yeojohnson, lmbda=normalization_constants['lambda'])
-        self.lmbda = normalization_constants['lambda']
+        self.transformer = partial(yeojohnson, lmbda=normalization_constants['lmbda'])
+        self.lmbda = normalization_constants['lmbda']
         self.mean = normalization_constants['mean']
         self.std = normalization_constants['std']
 

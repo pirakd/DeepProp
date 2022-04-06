@@ -3,6 +3,7 @@ from torch.autograd import Variable
 from torch.functional import F
 import torch
 
+
 def MaskedMean(x, mask, dim):
     mask = mask.int().unsqueeze(-1)
     return (x * mask).sum(dim) / mask.sum(dim)
@@ -18,7 +19,7 @@ class FocalLoss(nn.Module):
         super(FocalLoss, self).__init__()
         self.gamma = gamma
         self.reduction = reduction
-        self.BCE = torch.nn.BCEWithLogitsLoss(reduction='none')
+        self.BCE = torch.nn.BCEWithLogitsLoss(reduction=reduction)
     def forward(self, x, y):
         logpt = -self.BCE(x, y)
         pt = torch.exp(logpt)
@@ -30,3 +31,6 @@ class FocalLoss(nn.Module):
             return loss.sum()
         else:
             assert 0, 'No such reduction for FocalLoss'
+
+# class MaskedBatchNorm():
+#     torch.nn.BatchNorm1d

@@ -59,14 +59,26 @@ def run(sys_args):
     # generating datasets
     train_indexes, val_indexes, test_indexes = train_test_split(len(directed_interactions_pairs_list), args['train']['train_val_test_split'],
                                                                 random_state=rng)
-    train_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[train_indexes], sources, terminals, args['data']['normalization_method'],
-                                 normalization_constants_dict, directed_interactions_source_type[train_indexes], id_to_degree=id_to_degree)
+    train_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[train_indexes],
+                                 sources, terminals, args['data']['normalization_method'],
+                                 normalization_constants_dict, degree_feature_normalization_constants=None,
+                                 pairs_source_type=directed_interactions_source_type, id_to_degree=id_to_degree)
     train_loader = DataLoader(train_dataset, batch_size=args['train']['train_batch_size'], shuffle=True, pin_memory=False)
-    val_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[val_indexes], sources, terminals, args['data']['normalization_method'],
-                               normalization_constants_dict, directed_interactions_source_type[val_indexes], id_to_degree)
+
+    degree_normalization_constants = {'lmbda': train_dataset.degree_normalizer.lmbda,
+                                      'mean':train_dataset.degree_normalizer.lmbda,
+                                      'std':train_dataset.degree_normalizer.std}
+    val_dataset = LightDataset(row_id_to_idx, col_id_to_idx,
+                               propagation_scores, directed_interactions_pairs_list[val_indexes],
+                               sources, terminals, args['data']['normalization_method'],
+                               normalization_constants_dict, degree_normalization_constants,
+                               directed_interactions_source_type[val_indexes], id_to_degree)
     val_loader = DataLoader(val_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=False)
-    test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[test_indexes], sources, terminals, args['data']['normalization_method'],
-                                normalization_constants_dict, directed_interactions_source_type[test_indexes], id_to_degree)
+    test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores,
+                                directed_interactions_pairs_list[test_indexes],
+                                sources, terminals, args['data']['normalization_method'],
+                                normalization_constants_dict, degree_normalization_constants,
+                                directed_interactions_source_type[test_indexes], id_to_degree)
     test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=False,)
 
     # init model
@@ -92,7 +104,8 @@ def run(sys_args):
     else:
         test_results_dict = {}
 
-    results_dict = {'train_stats': train_stats, 'test_stats': test_results_dict, 'n_experiments': n_experiments}
+    results_dict = {'train_stats': train_stats, 'test_stats': test_results_dict, 'n_experiments': n_experiments,
+                    'normalization_constants_dicts': {'samples': normalization_constants_dict, 'degrees': degree_normalization_constants}}
     log_results(output_file_path,  args, results_dict, best_model)
 
 
@@ -100,11 +113,12 @@ if __name__ == '__main__':
     input_type = 'drug'
     load_prop = False
     save_prop = False
-    n_exp = 2
+    n_exp = 3
     split = [0.66, 0.14, 0.2]
-    interaction_type = ['KPI', 'STKE']
+    interaction_type = ['KPI', 'STKE', 'EGFR', 'E3']
+    interaction_type = ['STKE']
     device = 'cpu'
-    prop_scores_filename = 'drug_KPI_STKE'
+    prop_scores_filename = 'drug_STKE'
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ex', '--ex_type', dest='experiments_type', type=str, help='name of experiment type(drug, colon, etc.)', default=input_type)
@@ -119,6 +133,6 @@ if __name__ == '__main__':
                         help='Name of prop score file(save/load)', default=prop_scores_filename)
 
     args = parser.parse_args()
-    args.load_prop_scores = True
-    # args.save_prop_scores =  True
+    # args.load_prop_scores = True
+    args.save_prop_scores =  True
     run(args)
