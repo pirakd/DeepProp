@@ -104,7 +104,7 @@ class ClassifierTrainer(Trainer):
             classifier_loss = self.criteria(out, labels_batch)
             if self.intermediate_loss_weight:
                 intermediate_loss = self.intermediate_criteria(torch.squeeze(pre_pred),
-                                        torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.get_default_dtype()))
+                                        torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.get_default_dtype()))/model.n_experiments
                 epoch_intermediate_loss += intermediate_loss.item()
 
                 loss = ((1-self.intermediate_loss_weight) * classifier_loss) +\
@@ -148,7 +148,7 @@ class ClassifierTrainer(Trainer):
                 classifier_loss = self.criteria(out, eval_labels_batch)
                 if self.intermediate_loss_weight:
                     eval_intermediate_loss = self.intermediate_criteria(torch.squeeze(pre_pred),
-                                            torch.repeat_interleave(eval_labels_batch, model.n_experiments).to(torch.get_default_dtype()))
+                                            torch.repeat_interleave(eval_labels_batch, model.n_experiments).to(torch.get_default_dtype()))/model.n_experiments
                     eval_epoch_intermediate_eval_loss += eval_intermediate_loss.item()
 
                     loss = ((1-self.intermediate_loss_weight) * classifier_loss) +\
@@ -173,7 +173,7 @@ class ClassifierTrainer(Trainer):
             mean_auc = auc(recall, precision)
 
             avg_eval_loss = eval_loss / n_samples
-            avg_eval_intermediate_loss = eval_epoch_intermediate_eval_loss / n_samples
+            avg_eval_intermediate_loss = eval_epoch_intermediate_eval_loss/n_samples
             avg_eval_classifier_loss = epoch_classifier_loss / n_samples
             eval_acc = hits / n_samples
             return avg_eval_loss, avg_eval_intermediate_loss, avg_eval_classifier_loss, eval_acc, mean_auc, precision, recall
