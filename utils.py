@@ -94,7 +94,7 @@ def read_priors(sources_filename, terminals_filename, translator=None):
 
 
 def read_data(network_filename, directed_interaction_filename, sources_filename, terminals_filename, n_exp,
-              max_set_size, rng, translate_genes=True):
+              max_set_size, rng, translate_genes=True, is_balance_dataset=True):
     # set paths
     root_path = get_root_path()
     input_file = path.join(root_path, 'input')
@@ -117,7 +117,8 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     merged_network =\
         pd.concat([network.drop(directed_interactions.index.intersection(network.index)), directed_interactions,])
     merged_graph = nx.from_pandas_edgelist(network.reset_index(), 0, 1, 'edge_score')
-    directed_interactions = balance_dataset(merged_graph, directed_interactions, rng)
+    if is_balance_dataset:
+        directed_interactions = balance_dataset(merged_graph, directed_interactions, rng)
     sources, terminals = read_priors(sources_file_path, terminals_file_path, translator)
 
     # constrain to network's genes
@@ -301,7 +302,7 @@ def get_power_transform_lambda(pairs_indexes, source_indexes, terminal_indexes, 
         p_sample = ratio
 
     sampled_idx = np.nonzero(np.random.binomial(1, p_sample, int(p_sample * total_examples)))[0]
-    pair_idxs = (sampled_idx//len(pairs_indexes)).astype(int)
+    pair_idxs = (sampled_idx//len(source_indexes)).astype(int)
     exp_idx = np.mod(sampled_idx, len(source_indexes))
     sampled_elements = []
     for idx in range(len(sampled_idx)):
