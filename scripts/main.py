@@ -9,7 +9,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 from utils import read_data, log_results, get_time, get_root_path, train_test_split, get_loss_function,\
-    gen_propagation_scores
+    gen_propagation_scores, redirect_output
 import torch
 import numpy as np
 from presets import experiments_20, experiments_50, experiments_all
@@ -22,6 +22,7 @@ def run(sys_args):
     output_folder = 'output'
     output_file_path = path.join(get_root_path(), output_folder, path.basename(__file__).split('.')[0], get_time())
     makedirs(output_file_path, exist_ok=True)
+    redirect_output(path.join(output_file_path, 'log'))
     n_experiments = sys_args.n_experiments
 
     if  n_experiments == 0:
@@ -57,8 +58,8 @@ def run(sys_args):
         gen_propagation_scores(args, network, sources, terminals, genes_ids_to_keep, directed_interactions_pairs_list)
 
     # generating datasets
-    train_indexes, val_indexes, test_indexes = train_test_split(len(directed_interactions_pairs_list), args['train']['train_val_test_split'],
-                                                                random_state=rng)
+    train_indexes, val_indexes, test_indexes = train_test_split(args['data']['split_type'], len(directed_interactions_pairs_list), args['train']['train_val_test_split'],
+                                                                random_state=rng, directed_interactions=directed_interactions_pairs_list)
     train_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores, directed_interactions_pairs_list[train_indexes],
                                  sources, terminals, args['data']['normalization_method'],
                                  normalization_constants_dict, degree_feature_normalization_constants=None,
@@ -81,22 +82,29 @@ def run(sys_args):
                                 directed_interactions_source_type[test_indexes], id_to_degree)
     test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=False,)
 
-    # init model
-    deep_prop_model = DeepProp(args['model'], n_experiments)
-    model = DeepPropClassifier(deep_prop_model).to(device)
+    models_list = []
+    train_stats_list = []
+    for i in range(sys_args.n_models):
+        # init model
+        deep_prop_model = DeepProp(args['model'], n_experiments)
+        model = DeepPropClassifier(deep_prop_model).to(device)
 
-    # init train
-    optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args['train']['learning_rate'])
-    intermediate_loss_type = get_loss_function(args['train']['intermediate_loss_type'],
-                                               focal_gamma=args['train']['focal_gamma'])
-    trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyLoss(reduction='sum'), intermediate_criteria=intermediate_loss_type,
-                                intermediate_loss_weight=args['train']['intermediate_loss_weight'],
-                                optimizer=optimizer, eval_metric=None, eval_interval=args['train']['eval_interval'], device=device)
+        # init train
+        optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args['train']['learning_rate'])
+        intermediate_loss_type = get_loss_function(args['train']['intermediate_loss_type'],
+                                                   focal_gamma=args['train']['focal_gamma'])
+        trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyLoss(reduction='sum'), intermediate_criteria=intermediate_loss_type,
+                                    intermediate_loss_weight=args['train']['intermediate_loss_weight'],
+                                    optimizer=optimizer, eval_metric=None, eval_interval=args['train']['eval_interval'], device=device)
+        # train
+        train_stats, best_model = trainer.train(train_loader=train_loader, eval_loader=val_loader, model=model,
+                                                max_evals_no_improvement=args['train']['max_evals_no_imp'])
+        models_list.append(best_model)
+        train_stats_list.append(train_stats)
 
-    # train
-    train_stats, best_model = trainer.train(train_loader=train_loader, eval_loader=val_loader, model=model,
-                                            max_evals_no_improvement=args['train']['max_evals_no_imp'])
-
+    best_model_idx = np.argmax([x['best_auc'] for x in train_stats_list])
+    best_model = models_list[best_model_idx]
+    train_stats = train_stats_list[best_model_idx]
     if len(test_dataset):
         test_results_dict = \
             trainer.eval_by_source(best_model, test_loader)
@@ -110,15 +118,14 @@ def run(sys_args):
 
 
 if __name__ == '__main__':
+    n_models = 3
     input_type = 'drug'
-    load_prop = False
-    save_prop = False
     n_exp = 3
     split = [0.66, 0.14, 0.2]
-    interaction_type = ['KPI', 'STKE', 'EGFR', 'E3']
-    interaction_type = ['STKE']
+    interaction_type = sorted(['KPI', 'E3', 'EGFR', 'STKE'])
+    # interaction_type = ['STKE']
     device = 'cpu'
-    prop_scores_filename = 'drug_STKE'
+    prop_scores_filename = 'input_type_' + '_'.join(interaction_type) + '_{}'.format(n_exp)
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ex', '--ex_type', dest='experiments_type', type=str, help='name of experiment type(drug, colon, etc.)', default=input_type)
@@ -131,8 +138,9 @@ if __name__ == '__main__':
                         default=interaction_type)
     parser.add_argument('-p', '--prop_file', dest='prop_scores_filename', type=str,
                         help='Name of prop score file(save/load)', default=prop_scores_filename)
-
+    parser.add_argument('--n_models', dest='n_models', type=int,
+                        help='number_of_models_to_train', default=n_models)
     args = parser.parse_args()
     # args.load_prop_scores = True
-    args.save_prop_scores =  True
+    args.save_prop_scores = True
     run(args)

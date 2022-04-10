@@ -10,6 +10,8 @@ import pandas as pd
 import torch
 from deep_learning.deep_utils import FocalLoss
 from tqdm import tqdm
+import sys
+
 
 def balance_dataset(graph, directed_interactions, rng):
     sources = directed_interactions['source'].unique()
@@ -422,13 +424,32 @@ def load_pickle(load_dir):
 def save_model(path, model):
     torch.save(model.state_dict(), path)
 
-
 def load_model(path, args, device='cpu'):
     from deep_learning.models import DeepProp, DeepPropClassifier
     state_dict = torch.load(path, map_location=device)
     n_experiments = state_dict['classifier.0.weight'].shape[1]
     deep_prop_model = DeepProp(args['model'], n_experiments)
-
     model = DeepPropClassifier(deep_prop_model)
     model.load_state_dict(state_dict)
     return model
+
+
+def redirect_output(path):
+    sys.stdout = Logger(path, sys.stdout)
+    sys.stderr = Logger(path, sys.stderr)
+
+class Logger(object):
+    def __init__(self, path, out_type):
+        self.terminal = out_type
+        self.log = open(path, "a")
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+        self.log.flush()
+
+    def flush(self):
+        # this flush method is needed for python 3 compatibility.
+        # this handles the flush command by doing nothing.
+        # you might want to specify some extra behavior here.
+        pass
