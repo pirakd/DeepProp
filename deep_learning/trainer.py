@@ -187,7 +187,7 @@ class ClassifierTrainer(Trainer):
         with torch.no_grad():
             for eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_batch,\
                 eval_pair_source_type_batch, eval_pair_degree_batch in\
-                    tqdm(eval_loader, desc='Predicting edges direction' ,total=n_batches ):
+                    tqdm(eval_loader, desc='Predicting edges direction' ,total=n_batches):
                 if self.device != 'cpu':
                     eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_degree_batch =\
                         (x.to(self.device) for x in[eval_source_batch, eval_terminal_batch, eval_labels_batch, eval_pair_degree_batch])
@@ -236,7 +236,7 @@ class ClassifierTrainer(Trainer):
                     classifier_loss = self.criteria(out, type_labels)
                     if self.intermediate_loss_weight:
                         eval_intermediate_loss = self.intermediate_criteria(torch.squeeze(pre_pred, dim=1),
-                                                torch.repeat_interleave(type_labels, model.n_experiments).to(torch.get_default_dtype()))
+                                                torch.repeat_interleave(type_labels, model.n_experiments).to(torch.get_default_dtype()))//model.n_experiments
 
                         loss = ((1-self.intermediate_loss_weight) * classifier_loss) +\
                                (self.intermediate_loss_weight * eval_intermediate_loss)
