@@ -116,15 +116,16 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     # do all the reading stuff
     network = read_network(network_file_path, translator)
     directed_interactions = read_directed_interactions(directed_interaction_folder, directed_interaction_filename, translator)
+    both_ways_interactions = directed_interactions.index.union(directed_interactions.index.swaplevel())
     merged_network =\
-        pd.concat([network.drop(directed_interactions.index.intersection(network.index)), directed_interactions,])
-    merged_graph = nx.from_pandas_edgelist(network.reset_index(), 0, 1, 'edge_score')
+        pd.concat([network.drop(both_ways_interactions.intersection(network.index)), directed_interactions,])
+    merged_graph = nx.from_pandas_edgelist(merged_network.reset_index(), 0, 1, 'edge_score')
     if is_balance_dataset:
         directed_interactions = balance_dataset(merged_graph, directed_interactions, rng)
     sources, terminals = read_priors(sources_file_path, terminals_file_path, translator)
 
     # constrain to network's genes
-    unique_genes = set((np.array(merged_network.index.to_list()).ravel()))
+    unique_genes = set(merged_graph.nodes)
     sources = {exp_name: set([gene for gene in genes if gene in unique_genes]) for exp_name, genes in sources.items()}
     terminals = {exp_name: set([gene for gene in genes if gene in unique_genes]) for exp_name, genes in terminals.items()}
 
@@ -441,7 +442,7 @@ def redirect_output(path):
 class Logger(object):
     def __init__(self, path, out_type):
         self.terminal = out_type
-        self.log = open(path, "a")
+        self.log = open(path, "a", buffering=1)
 
     def write(self, message):
         self.terminal.write(message)
