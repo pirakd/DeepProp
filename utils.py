@@ -11,7 +11,7 @@ import torch
 from deep_learning.deep_utils import FocalLoss
 from tqdm import tqdm
 import sys
-
+import copy
 
 def balance_dataset(graph, directed_interactions, rng):
     sources = directed_interactions['source'].unique()
@@ -40,6 +40,16 @@ def read_network(network_filename, translator):
         gene_ids = set(network.index.get_level_values(0)).union(set(network.index.get_level_values(1)))
         up_do_date_ids = translator.translate(gene_ids, 'entrez_id', 'entrez_id')
         network.rename(index=up_do_date_ids, inplace=True)
+    # not_self_edge = network.index.get_level_values(0) ==  network.index.get_level_values(1)
+    # network = network[not_self_edge]
+    # sort edges to find duplicates
+    network_index = np.sort(np.array([list(x) for x in network.index]), axis=1)
+    network.index = pd.MultiIndex.from_tuples([(network_index[x, 0], network_index[x, 1])for x in
+                                               range(network_index.shape[0])], names=[0, 1])
+
+    # average same index entries
+    network = network.groupby(level=[0, 1]).mean()
+
     return network
 
 
@@ -52,7 +62,6 @@ def read_directed_interactions(directed_interactions_folder, directed_interactio
         directed_interactions = pd.read_table(path.join(directed_interactions_folder, name))
         directed_interactions['source'] = name
         # remove self edges
-        not_self_edge = directed_interactions['from'].ne(directed_interactions['to'])
         genes = pd.unique(directed_interactions[['from', 'to']].values.ravel())
 
         if gene_translator is not None:
@@ -62,12 +71,11 @@ def read_directed_interactions(directed_interactions_folder, directed_interactio
                 translation_dict = gene_translator.translate(genes, 'entrez_id', 'entrez_id')
 
             has_translation = directed_interactions['from'].isin(translation_dict) & directed_interactions['to'].isin(translation_dict)
-        else:
-            has_translation = np.ones_like(not_self_edge)
-        directed_interactions = directed_interactions[has_translation & not_self_edge]
-        if gene_translator is not None:
+            directed_interactions = directed_interactions[has_translation]
             directed_interactions.replace(translation_dict, inplace=True)
 
+
+        directed_interactions = directed_interactions[directed_interactions['from'] != (directed_interactions['to'])]
         all_interactions = pd.concat((all_interactions, directed_interactions))
 
     all_interactions['edge_score'] = 0.8
@@ -116,9 +124,14 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     # do all the reading stuff
     network = read_network(network_file_path, translator)
     directed_interactions = read_directed_interactions(directed_interaction_folder, directed_interaction_filename, translator)
-    both_ways_interactions = directed_interactions.index.union(directed_interactions.index.swaplevel())
+
+    sorted_interaction_df = copy.deepcopy(directed_interactions)
+    sorted_interaction_index = np.sort(np.array([list(x) for x in directed_interactions.index]), axis=1)
+    sorted_interaction_df.index = pd.MultiIndex.from_tuples([(sorted_interaction_index[x, 0], sorted_interaction_index[x, 1])for x in
+                                               range(sorted_interaction_index.shape[0])], names=[0, 1])
+    sorted_interaction_df = sorted_interaction_df[~sorted_interaction_df.index.duplicated()]
     merged_network =\
-        pd.concat([network.drop(both_ways_interactions.intersection(network.index)), directed_interactions,])
+        pd.concat([network.drop(sorted_interaction_df.index.intersection(network.index)), sorted_interaction_df])
     merged_graph = nx.from_pandas_edgelist(merged_network.reset_index(), 0, 1, 'edge_score')
     if is_balance_dataset:
         directed_interactions = balance_dataset(merged_graph, directed_interactions, rng)
@@ -146,7 +159,7 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
     sources = {exp_name: sources[exp_name] for exp_name in filtered_experiments}
     terminals = {exp_name: terminals[exp_name] for exp_name in filtered_experiments}
 
-    id_to_degree =  dict(merged_graph.degree(weight='edge_score'))
+    id_to_degree = dict(merged_graph.degree(weight='edge_score'))
 
     return merged_network, directed_interactions, sources, terminals, id_to_degree
 
