@@ -79,6 +79,8 @@ def read_directed_interactions(directed_interactions_folder, directed_interactio
         all_interactions = pd.concat((all_interactions, directed_interactions))
 
     all_interactions['edge_score'] = 0.8
+    all_interactions = all_interactions[~all_interactions.duplicated(subset=['from','to','source'], keep='first')]
+
     all_interactions.index = pd.MultiIndex.from_arrays(all_interactions[['from', 'to']].values.T)
 
     return all_interactions[['source', 'edge_score']]
@@ -157,7 +159,6 @@ def read_data(network_filename, directed_interaction_filename, sources_filename,
         assert 0, 'Wrong input in args[data][n_experiments]'
     sources = {exp_name: sources[exp_name] for exp_name in filtered_experiments}
     terminals = {exp_name: terminals[exp_name] for exp_name in filtered_experiments}
-
     id_to_degree = dict(merged_graph.degree(weight='edge_score'))
 
     return merged_network, directed_interactions, sources, terminals, id_to_degree
