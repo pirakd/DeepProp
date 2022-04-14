@@ -80,7 +80,6 @@ def read_directed_interactions(directed_interactions_folder, directed_interactio
 
     all_interactions['edge_score'] = 0.8
     all_interactions.index = pd.MultiIndex.from_arrays(all_interactions[['from', 'to']].values.T)
-    all_interactions = all_interactions[~all_interactions.index.duplicated(keep='first')]
 
     return all_interactions[['source', 'edge_score']]
 
@@ -467,3 +466,48 @@ class Logger(object):
         # this handles the flush command by doing nothing.
         # you might want to specify some extra behavior here.
         pass
+
+def tweak_undirected_network(undirected_network, directed_edges, alpha):
+    return 1
+
+def generate_directed_similarity_matrix(graph, directed_edge_list, alpha):
+    genes = sorted(graph.nodes)
+    gene_indexes = dict([(gene, index) for (index, gene) in enumerate(genes)])
+    matrix = nx.to_scipy_sparse_matrix(graph, genes, weight='edge_score')
+    for directed_edge in directed_edge_list:
+        head, tail = directed_edge[0], directed_edge[1]
+        pair_indexes = gene_indexes[head], gene_indexes[tail]
+
+        #  remove opposite direction, row=to, column=from
+        # if edge (1,4) is directed then we zeroise index [1,4]
+        matrix[pair_indexes[0], pair_indexes[1]] = 0
+
+    norm_matrix = scipy.sparse.diags(1 / matrix.sum(0).A1)
+    sim_matrix = matrix * norm_matrix
+    sim_matrix.data[np.isnan(sim_matrix.data)] = 0.0
+    return alpha*sim_matrix, genes
+
+def propagate_directed_network(undirected_network, directed_edges, sources, terminals, args):
+    propagate_alpha = args['propagation']['alpha']
+    propagation_iterations = args['propagation']['n_iterations']
+    propagation_epsilon = args['propagation']['eps']
+    graph = nx.from_pandas_edgelist(undirected_network.reset_index(), 0, 1, 'edge_score')
+    directed_similarity_matrix, genes = generate_directed_similarity_matrix(graph, directed_edges, args['propagation']['alpha'])
+    gene_id_to_idx = dict([(gene, index) for (index, gene) in enumerate(genes)])
+    gene_idx_to_id = {xx: x for x,xx in gene_id_to_idx.items()}
+    genes_ids_to_keep = genes
+    all_source_terminal_genes = sorted(list(set.union(set.union(*sources.values()), set.union(*terminals.values()))))
+    num_genes = len(gene_idx_to_id)
+    propagation_scores = np.array([propagate([s], directed_similarity_matrix, gene_id_to_idx, num_genes, propagate_alpha, propagation_iterations,
+                                        propagation_epsilon) for s in tqdm(all_source_terminal_genes,
+                                                                           desc='propagating scores',
+                                                                           total=len(all_source_terminal_genes))])
+    if genes_ids_to_keep:
+        genes_idxs_to_keep = [gene_id_to_idx[id] for id in genes_ids_to_keep]
+        propagation_scores = propagation_scores[:, genes_idxs_to_keep]
+        col_id_to_idx = {gene_idx_to_id[idx]: i for i,idx in enumerate(genes_idxs_to_keep)}
+    else:
+        col_id_to_idx = {xx:x for x,xx in gene_idx_to_id.items()}
+
+    row_id_to_idx = {id:i for i, id in enumerate(all_source_terminal_genes)}
+    return propagation_scores, row_id_to_idx, col_id_to_idx
