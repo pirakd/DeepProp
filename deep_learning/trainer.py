@@ -1,11 +1,10 @@
 import torch
 import numpy as np
-from sklearn.metrics import roc_curve, auc
+from sklearn.metrics import auc
 from sklearn.metrics import precision_recall_curve
 from torch import Tensor
 import copy
 from tqdm import tqdm
-
 
 class Trainer():
     def __init__(self, n_epochs, criteria, optimizer, eval_metric,  eval_interval=1,  device='cpu', verbose=3, early_stop=None):
@@ -40,6 +39,7 @@ class ClassifierTrainer(Trainer):
             self.intermediate_loss_weight = None
 
     def train(self, train_loader, eval_loader, model, max_evals_no_improvement=8):
+
         best_model = None
         self.losses = {'train': [], 'validation': []}
         self.metrics = {'train': [], 'validation': []}
@@ -51,6 +51,7 @@ class ClassifierTrainer(Trainer):
         for epoch in range(self.n_epochs):
             epoch_loss, epoch_intermediate_loss, epoch_classifier_loss, epoch_hits =\
                 self.train_single_epoch(model,train_loader)
+
             self.losses['train'].append(epoch_loss/(n_samples_per_epoch))
             self.metrics['train'].append(epoch_hits/n_samples_per_epoch)
             print('epoch {}, train_loss: {:.2e}, classifier_loss: {:.2e}, intermediate_loss:{:.2e} train_acc:{:.2f}'
@@ -64,7 +65,7 @@ class ClassifierTrainer(Trainer):
                 self.losses['validation'].append(avg_eval_loss)
                 self.metrics['validation'].append(eval_acc)
                 print('epoch {}, validation loss:{:.2e}, validation classifier loss:'
-                      ' {:.2e}, validation intermediate loss: {:.2e}, validation acc: {:.2f}, validation auc: {:.2f}'
+                      ' {:.2e}, validation intermediate loss: {:.2e}, validation acc: {:.2f}, validation auc: {:.3f}'
                       .format(epoch, avg_eval_loss, avg_eval_classifier_loss, avg_eval_intermediate_loss,
                               eval_acc, eval_auc))
 
@@ -98,24 +99,19 @@ class ClassifierTrainer(Trainer):
                     (x.to(self.device) for x in[source_batch, terminal_batch, labels_batch, pair_degree])
             if torch.get_default_dtype() is torch.float32:
                 source_batch, terminal_batch, pair_degree = source_batch.float(), terminal_batch.float(), pair_degree.float()
-
             out, pred, pre_pred = model(source_batch, terminal_batch, pair_degree)
-
             classifier_loss = self.criteria(out, labels_batch)
             if self.intermediate_loss_weight:
                 intermediate_loss = self.intermediate_criteria(torch.squeeze(pre_pred),
                                         torch.repeat_interleave(labels_batch, model.n_experiments).to(torch.get_default_dtype()))/model.n_experiments
                 epoch_intermediate_loss += intermediate_loss.item()
-
                 loss = ((1-self.intermediate_loss_weight) * classifier_loss) +\
                        (self.intermediate_loss_weight * intermediate_loss)
             else:
                 loss = classifier_loss
-
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-
             epoch_loss += loss.item()
             epoch_classifier_loss += classifier_loss.item()
             hits += torch.sum(pred == labels_batch).item()
@@ -159,7 +155,7 @@ class ClassifierTrainer(Trainer):
                 eval_loss += loss.item()
                 epoch_classifier_loss += classifier_loss.item()
                 hits += torch.sum(pred == eval_labels_batch).item()
-                all_outs.append(out.cpu().detach().numpy())
+                all_outs.append(out.detach().cpu().numpy())
                 all_labels.append(eval_labels_batch)
 
             # probs = torch.nn.functional.softmax(torch.squeeze(torch.cat(all_outs, 0)), dim=1).cpu().detach().numpy()
@@ -179,7 +175,6 @@ class ClassifierTrainer(Trainer):
             return avg_eval_loss, avg_eval_intermediate_loss, avg_eval_classifier_loss, eval_acc, mean_auc, precision, recall
 
     def predict(self, model, eval_loader):
-
         all_outs = []
         all_pairs = []
         n_batches = int(len(eval_loader.dataset) // eval_loader.batch_size + 1)
@@ -196,7 +191,7 @@ class ClassifierTrainer(Trainer):
                         eval_source_batch.float(), eval_terminal_batch.float(), eval_pair_degree_batch.float()
                 out, pred, pre_pred = model(eval_source_batch, eval_terminal_batch, eval_pair_degree_batch)
 
-                all_outs.append(out.cpu().detach().numpy())
+                all_outs.append(out.detach().cpu().numpy())
                 all_pairs.append(torch.stack(eval_pair_batch).detach().cpu().numpy())
 
             all_probs = torch.nn.functional.softmax(torch.squeeze(Tensor(np.concatenate(all_outs, 0))), dim=1).numpy()
@@ -236,7 +231,7 @@ class ClassifierTrainer(Trainer):
                     classifier_loss = self.criteria(out, type_labels)
                     if self.intermediate_loss_weight:
                         eval_intermediate_loss = self.intermediate_criteria(torch.squeeze(pre_pred, dim=1),
-                                                torch.repeat_interleave(type_labels, model.n_experiments).to(torch.get_default_dtype()))//model.n_experiments
+                                                torch.repeat_interleave(type_labels, model.n_experiments).to(torch.get_default_dtype())) / model.n_experiments
 
                         loss = ((1-self.intermediate_loss_weight) * classifier_loss) +\
                                (self.intermediate_loss_weight * eval_intermediate_loss)
@@ -246,14 +241,18 @@ class ClassifierTrainer(Trainer):
                     if unique_type not in output_per_type_dict:
                         output_per_type_dict[unique_type] = copy.deepcopy(type_output_dict)
 
-                    output_per_type_dict[unique_type]['intermediate_loss'] += eval_intermediate_loss.item()
+                    if self.intermediate_loss_weight:
+                        output_per_type_dict[unique_type]['intermediate_loss'] += eval_intermediate_loss.item()
+                        output_per_type_dict['overall']['intermediate_loss'] += eval_intermediate_loss.item()
+                    else:
+                        output_per_type_dict[unique_type]['intermediate_loss'] += 0
+                        output_per_type_dict['overall']['intermediate_loss'] += 0
                     output_per_type_dict[unique_type]['classifier_loss'] += classifier_loss.item()
                     output_per_type_dict[unique_type]['loss'] += loss.item()
                     output_per_type_dict[unique_type]['hits'] += torch.sum(pred == type_labels).item()
                     output_per_type_dict[unique_type]['probs'].append(out.cpu().detach().numpy())
                     output_per_type_dict[unique_type]['labels'].append(type_labels)
 
-                    output_per_type_dict['overall']['intermediate_loss'] += eval_intermediate_loss.item()
                     output_per_type_dict['overall']['classifier_loss'] += classifier_loss.item()
                     output_per_type_dict['overall']['loss'] += loss.item()
                     output_per_type_dict['overall']['hits'] += torch.sum(pred == type_labels).item()
