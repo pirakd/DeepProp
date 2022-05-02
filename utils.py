@@ -287,11 +287,21 @@ def get_dataset_mean_std(pairs_indexes, source_indexes, terminal_indexes, propag
     """
     total_elements = 0
     total_mean, total_S = 0, 0
+    total_examples = len(pairs_indexes) * len(source_indexes)
+    max_num_examples = 25000
+    total_examples = len(pairs_indexes) * len(source_indexes)
+    p_sample = np.minimum(1, max_num_examples/total_examples)
 
-    for pair in pairs_indexes:
-        for exp_idx in range(len(source_indexes)):
-            source_feature = propagation_scores[:, pair][source_indexes[exp_idx], :].ravel()
-            terminal_feature = propagation_scores[:, pair][terminal_indexes[exp_idx], :].ravel()
+    sampled_idx = np.nonzero(np.random.binomial(1, p_sample, int(p_sample * total_examples)))[0]
+    pair_idxs = (sampled_idx//len(source_indexes)).astype(int)
+    exp_idx = np.mod(sampled_idx, len(source_indexes))
+
+    for idx in range(len(sampled_idx)):
+            source_feature = propagation_scores[:, [pairs_indexes[pair_idxs[idx]]]][source_indexes[exp_idx[idx]],
+                                    :].ravel()
+            terminal_feature = propagation_scores[:, [pairs_indexes[pair_idxs[idx]]]][source_indexes[exp_idx[idx]],
+                                    :].ravel()
+
             all_features = np.concatenate([source_feature,terminal_feature])
 
             num_new_elements =  len(all_features)
@@ -306,16 +316,9 @@ def get_dataset_mean_std(pairs_indexes, source_indexes, terminal_indexes, propag
 
 def get_power_transform_lambda(pairs_indexes, source_indexes, terminal_indexes, propagation_scores):
     from sklearn.preprocessing import PowerTransformer
-    min_num_examples = 1000000
-    min_example_ratio = 0.2
+    max_num_examples = 25000
     total_examples = len(pairs_indexes) * len(source_indexes)
-    ratio = min_num_examples/total_examples
-    if ratio < min_example_ratio:
-        p_sample = 0.2
-    elif ratio >= 1:
-        p_sample = 1
-    else: # 0.2 < ratio < 1:len(sa
-        p_sample = ratio
+    p_sample = np.minimum(1, max_num_examples/total_examples)
 
     sampled_idx = np.nonzero(np.random.binomial(1, p_sample, int(p_sample * total_examples)))[0]
     pair_idxs = (sampled_idx//len(source_indexes)).astype(int)
@@ -332,6 +335,7 @@ def get_power_transform_lambda(pairs_indexes, source_indexes, terminal_indexes, 
     std = np.std(transformed)
     return {'lmbda':pt.lambdas_[0], 'mean': mean, 'std':std}
 
+
 def get_normalization_constants(pairs_indexes, source_indexes, terminal_indexes, propagation_scores, normalization_method):
     if normalization_method == 'standard':
         return get_dataset_mean_std(pairs_indexes, source_indexes, terminal_indexes, propagation_scores)
@@ -339,7 +343,6 @@ def get_normalization_constants(pairs_indexes, source_indexes, terminal_indexes,
         return get_power_transform_lambda(pairs_indexes, source_indexes, terminal_indexes, propagation_scores)
     else:
         assert 0, '{} is not a valid normalization method name'.format(normalization_method)
-
 
 
 def train_test_split(split_type ,n_samples, train_test_ratio,random_state:np.random.RandomState=None, directed_interactions=None, ):
@@ -496,19 +499,13 @@ def propagate_directed_network(undirected_network, directed_edges, sources, term
     directed_similarity_matrix, genes = generate_directed_similarity_matrix(graph, directed_edges, args['propagation']['alpha'])
     gene_id_to_idx = dict([(gene, index) for (index, gene) in enumerate(genes)])
     gene_idx_to_id = {xx: x for x,xx in gene_id_to_idx.items()}
-    genes_ids_to_keep = genes
-    all_source_terminal_genes = sorted(list(set.union(set.union(*sources.values()), set.union(*terminals.values()))))
     num_genes = len(gene_idx_to_id)
-    propagation_scores = np.array([propagate([s], directed_similarity_matrix, gene_id_to_idx, num_genes, propagate_alpha, propagation_iterations,
-                                        propagation_epsilon) for s in tqdm(all_source_terminal_genes,
-                                                                           desc='propagating scores',
-                                                                           total=len(all_source_terminal_genes))])
-    if genes_ids_to_keep:
-        genes_idxs_to_keep = [gene_id_to_idx[id] for id in genes_ids_to_keep]
-        propagation_scores = propagation_scores[:, genes_idxs_to_keep]
-        col_id_to_idx = {gene_idx_to_id[idx]: i for i,idx in enumerate(genes_idxs_to_keep)}
-    else:
-        col_id_to_idx = {xx:x for x,xx in gene_idx_to_id.items()}
+    propagation_scores = []
+    for source in tqdm(sources.values(), total=len(sources), desc= 'propagating scores'):
+        propagation_scores.append(np.array(propagate([s for s in source],
+                                                     directed_similarity_matrix, gene_id_to_idx,
+                                                     num_genes, propagate_alpha, propagation_iterations,
+                                                     propagation_epsilon)))
 
-    row_id_to_idx = {id:i for i, id in enumerate(all_source_terminal_genes)}
-    return propagation_scores, row_id_to_idx, col_id_to_idx
+    col_id_to_idx = {xx:x for x,xx in gene_idx_to_id.items()}
+    return propagation_scores, col_id_to_idx
