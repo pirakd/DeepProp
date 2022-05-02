@@ -1,60 +1,7 @@
 from torch.utils.data import Dataset
 import numpy as np
 import torch
-from sklearn.preprocessing import  PowerTransformer
-
-class ClassifierDataset(Dataset):
-    def __init__(self, source_features, terminal_features):
-        self.n_experiments = len(source_features)
-        self.n_directed_edges = len(source_features[0])
-        self.dataset = self.generate_dataset(source_features, terminal_features)
-
-    def __len__(self):
-        return self.dataset['source'].shape[0]
-
-    def __getitem__(self, idx):
-        if type(idx) == torch.Tensor:
-            idx = idx.item()
-
-        return self.dataset['source'][idx], self.dataset['terminal'][idx], self.dataset['labels'][idx]
-
-    def generate_dataset(self, source_features, terminal_features):
-        source_samples = []
-        terminal_samples = []
-        batch_labels = []
-        for i in range(self.n_directed_edges * 2):
-            label = 1
-
-            source_experiments_samples = []
-            terminal_experiments_samples = []
-
-            for e in range(self.n_experiments):
-
-                exp_source_score = source_features[e][np.mod(i, self.n_directed_edges), ...]
-                exp_terminal_score = terminal_features[e][np.mod(i, self.n_directed_edges), ...]
-                if i >= self.n_directed_edges:
-                    exp_source_score = np.flip(exp_source_score, axis=1)
-                    exp_terminal_score = np.flip(exp_terminal_score, axis=1)
-                    label = 0
-
-                source_experiments_samples.append(exp_source_score)
-                terminal_experiments_samples.append(exp_terminal_score)
-            source_samples.append(source_experiments_samples)
-            terminal_samples.append(terminal_experiments_samples)
-            batch_labels.append(label)
-
-        largest_source_set = np.max([source_samples[0][x].shape[0] for x in range(self.n_experiments)])
-        largest_terminal_set = np.max([terminal_samples[0][x].shape[0] for x in range(self.n_experiments)])
-
-        for sample_idx in range(len(source_samples)):
-            for exp_idx in range(self.n_experiments):
-                source_samples[sample_idx][exp_idx] = np.pad(source_samples[sample_idx][exp_idx], [(0, largest_source_set-source_samples[sample_idx][exp_idx].shape[0]), (0, 0)] )
-                terminal_samples[sample_idx][exp_idx] = np.pad(terminal_samples[sample_idx][exp_idx], [(0, largest_terminal_set-terminal_samples[sample_idx][exp_idx].shape[0]), (0, 0)] )
-
-        source_samples = np.array(source_samples)
-        terminal_samples = np.array(terminal_samples)
-
-        return {'source': source_samples, 'terminal': terminal_samples, 'labels': batch_labels}
+from sklearn.preprocessing import PowerTransformer
 
 
 class LightDataset(Dataset):
@@ -74,15 +21,19 @@ class LightDataset(Dataset):
         normalizer = self.get_normalization_method(normalization_method)
         self.normalizer = normalizer(samples_normalization_constants)
         self.pairs_source_type = pairs_source_type
-        self.idx_to_degree = {self.col_id_to_idx[id]: degree for id, degree in id_to_degree.items() if id in self.col_id_to_idx}
+        self.idx_to_degree = {self.col_id_to_idx[id]: id_to_degree[id] for id in self.col_id_to_idx.keys()}
         self.degree_normalizer = self.get_degree_normalizar(degree_feature_normalization_constants)
+        self.idx_to_degree = {self.col_id_to_idx[id]: self.degree_normalizer(id_to_degree[id]) for id in self.col_id_to_idx.keys()}
+        self.propagation_scores = self.normalizer(self.propagation_scores)
         self.train = train
+
     def __len__(self):
         return len(self.pairs_indexes) * 2
 
     def __getitem__(self, idx):
         if type(idx) == torch.Tensor:
             idx = idx.item()
+
         neg_flag = idx >= len(self.pairs_indexes)
         idx = np.mod(idx, len(self.pairs_indexes))
         label = 0 if neg_flag else 1
@@ -90,8 +41,8 @@ class LightDataset(Dataset):
         if neg_flag:
             pair = (pair[1], pair[0])
 
-        from_degree = self.degree_normalizer(self.idx_to_degree[pair[0]])
-        to_degree =  self.degree_normalizer(self.idx_to_degree[pair[1]])
+        from_degree = self.idx_to_degree[pair[0]]
+        to_degree = self.idx_to_degree[pair[1]]
 
         pair_source_type = self.pairs_source_type[idx] if self.pairs_source_type is not None else None
         source_sample = np.zeros((len(self.source_indexes), self.longest_source, 2))
@@ -99,9 +50,9 @@ class LightDataset(Dataset):
 
         for exp_idx in range(len(self.source_indexes)):
             source_sample[exp_idx, :len(self.source_indexes[exp_idx]), :] =\
-                self.normalizer(self.propagation_scores[:, pair][self.source_indexes[exp_idx], :])
+                self.propagation_scores[:, pair][self.source_indexes[exp_idx], :]
             terminal_sample[exp_idx, :len(self.terminal_indexes[exp_idx]), :] =\
-                self.normalizer(self.propagation_scores[:, pair][self.terminal_indexes[exp_idx], :])
+                self.propagation_scores[:, pair][self.terminal_indexes[exp_idx], :]
 
         return source_sample, terminal_sample, label, pair, pair_source_type, np.array([from_degree, to_degree])
 
@@ -138,6 +89,7 @@ class LightDataset(Dataset):
             std = normalization_constants['std']
             lmbda = normalization_constants['lmbda']
         return PowerNormalizer({'lmbda': lmbda, 'mean': mean, 'std': std})
+
 
 class StandardNormalizer():
     def __init__(self, normalization_constants):
