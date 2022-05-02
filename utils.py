@@ -8,6 +8,7 @@ import pickle
 import json
 import pandas as pd
 import torch
+from torch.optim import Adam, AdamW
 from deep_learning.deep_utils import FocalLoss
 from tqdm import tqdm
 import sys
@@ -399,6 +400,14 @@ def get_loss_function(loss_name, **kwargs):
     else:
         assert 0, '{} is not a valid loss name'.format(loss_name)
 
+
+def get_optimizer(optimizer_name):
+    if optimizer_name == 'ADAMW':
+        return AdamW
+    elif optimizer_name == 'ADAM':
+        return Adam
+    else:
+        assert 0, '{} is not a valid optimizer'.format(optimizer_name)
 
 def get_root_path():
     return path.dirname(path.realpath(__file__))
