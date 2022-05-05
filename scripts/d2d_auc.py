@@ -1,15 +1,11 @@
 from os import path
 import sys
-
 sys.path.append(path.dirname(path.dirname(path.realpath(__file__))))
 from os import path, makedirs
-from deep_learning.data_loaders import LightDataset
-from torch.utils.data import DataLoader
 import torch
-from utils import read_data, get_root_path, save_model, train_test_split, get_loss_function, get_time, \
+from utils import read_data, get_root_path, train_test_split, get_time, \
     gen_propagation_scores, redirect_output
 from D2D import eval_D2D, eval_D2D_2, generate_D2D_features_from_propagation_scores
-import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import precision_recall_curve, auc
 from presets import experiments_20, experiments_50, experiments_0
@@ -18,8 +14,6 @@ import argparse
 from scripts.scripts_utils import sources_filenmae_dict, terminals_filenmae_dict
 from collections import defaultdict
 
-n_models_per_fold = 2
-
 def run(sys_args):
     output_folder = 'output'
     output_file_path = path.join(get_root_path(), output_folder, path.basename(__file__).split('.')[0], get_time())
@@ -27,12 +21,7 @@ def run(sys_args):
     redirect_output(path.join(output_file_path, 'log'))
 
     n_experiments = sys_args.n_experiments
-    if n_experiments == 0 or n_experiments >= 70:
-        args = experiments_0
-    elif n_experiments <= 30:
-        args = experiments_20
-    else:
-        args = experiments_50
+    args = experiments_0
 
     if sys_args.device:
         device = torch.device("cuda:{}".format(sys_args.device))
@@ -68,7 +57,6 @@ def run(sys_args):
 
     d2d_2_probs_list, d2d_2_labels_list, d2d_probs_list, d2d_labels_list = [
         defaultdict(list) for x in range(4)]
-    best_models = []
     d2d_2_folds_stats, d2d_folds_stats = [], []
 
     for fold in range(n_folds):
@@ -103,8 +91,8 @@ def run(sys_args):
             d2d_2_probs_list[key].append(d2d_2_results_dict[key]['probs'][:, 1])
             d2d_2_labels_list[key].append(d2d_2_results_dict[key]['labels'])
 
-    final_stats =  {'d2d': {'final': {}, 'folds_stats': d2d_folds_stats},
-                   'd2d_2': {'final': {}, 'folds_stats': d2d_2_folds_stats}}
+    final_stats =  {'d2d': {'folds_stats': d2d_folds_stats, 'final': {}, },
+                   'd2d_2': {'folds_stats': d2d_2_folds_stats, 'final': {} }}
 
     d2d_2_probs_by_type, d2d_2_labels_by_type, d2d_probs_by_type, d2d_labels_by_type = [
         defaultdict(list) for x in range(4)]
@@ -133,16 +121,14 @@ def run(sys_args):
 
         final_stats['d2d']['final'][source_type] = {'auc': d2d_auc,
                                                     'acc': d2d_acc,
-                                                    'precision': d2d_precision_2,
-                                                    'recall': d2d_recall_2}
+                                                    'precision': list(d2d_precision_2),
+                                                    'recall': list(d2d_recall_2)}
         final_stats['d2d_2']['final'][source_type] = {'auc':d2d_2_auc,
                                                       'acc': d2d_2_acc,
-                                                      'precition': d2d_precision_2,
-                                                      'recall': d2d_recall_2
+                                                      'precision': list(d2d_precision),
+                                                      'recall': list(d2d_recall)
                                                       }
 
-    for fold in range(n_folds):
-        save_model(path.join(output_file_path, 'model_fold_{}'.format(fold)), best_models[fold])
     with open(path.join(output_file_path, 'args'), 'w') as f:
         json.dump(args, f, indent=4, separators=(',', ': '))
     with open(path.join(output_file_path, 'results'), 'w') as f:
