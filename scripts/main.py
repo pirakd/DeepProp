@@ -9,7 +9,7 @@ from deep_learning.trainer import ClassifierTrainer
 from torch import nn
 from torch.utils.data import DataLoader
 from utils import read_data, log_results, get_time, get_root_path, train_test_split, get_loss_function,\
-    gen_propagation_scores, redirect_output, get_optimizer
+    gen_propagation_scores, redirect_output, get_optimizer, save_model
 import torch
 import numpy as np
 from presets import experiments_20, experiments_50, experiments_0, experiments_all_datasets
@@ -125,14 +125,14 @@ def run(sys_args):
         json.dump(args, f, indent=4, separators=(',', ': '))
     with open(path.join(output_file_path, 'results'), 'w') as f:
         json.dump(results_dict, f, indent=4, separators=(',', ': '))
-
+    save_model(path.join(output_file_path, 'model'), best_model)
 if __name__ == '__main__':
     n_models = 1
     input_type = 'drug'
     n_exp = 2
     split = [0.8, 0.2, 0]
-    interaction_type = sorted(['KPI', 'E3', 'EGFR', 'STKE', 'PDI'])
-    interaction_type = sorted(['KEGG'])
+    interaction_type = sorted(['KPI', 'E3', 'EGFR', 'STKE', 'PDI', 'KEGG'])
+    # interaction_type = sorted(['KEGG'])
     device = None
     prop_scores_filename = input_type + '_' + '_'.join(interaction_type) + '_{}'.format(n_exp)
 
@@ -154,6 +154,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.prop_scores_filename = args.experiments_type + '_' + '_'.join(args.directed_interactions_filename) + '_{}'.format(args.n_experiments)
     # args.load_prop_scores = True
-    # args.save_prop_scores = True
+    args.save_prop_scores = True
     run(args)
 

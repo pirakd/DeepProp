@@ -2,14 +2,14 @@ import pandas as pd
 from os import path, makedirs
 import sys
 sys.path.append(path.dirname(path.dirname(path.realpath(__file__))))
-from utils import read_data, get_root_path
+from utils import read_data, get_root_path, train_test_split
 import numpy as np
-from utils import read_network, propagate_directed_network, redirect_output, get_time
+from utils import read_network, propagate_directed_network, redirect_output, get_time, train_test_split
 from scripts.scripts_utils import sources_filenmae_dict, terminals_filenmae_dict
 from gene_name_translator.gene_translator import GeneTranslator
 translator = GeneTranslator()
 translator.load_dictionary()
-from presets import experiments_all_datasets
+from presets import experiments_0
 import json
 from scipy.stats import hypergeom
 
@@ -19,13 +19,30 @@ output_folder = 'output'
 output_file_path = path.join(get_root_path(), output_folder, path.basename(__file__).split('.')[0], get_time())
 makedirs(output_file_path, exist_ok=True)
 
+directions_predictions_files = {'breast': '08_05_2022__14_11_30',
+                                'ovary':'08_05_2022__13_28_47',
+                                'AML':'08_05_2022__13_27_08',
+                                'colon':'08_05_2022__14_08_28',
+                                'd2d_breast': '08_05_2022__14_27_16',
+                                'd2d_AML': '08_05_2022__15_58_37',
+                                'd2d_colon': '08_05_2022__14_26_35',
+                                'd2d_ovary': '08_05_2022__14_25_49'}
+# directions_predictions_files = {'breast': 'breast',
+#                                 'ovary':'ovary',
+#                                 'AML':'AML',
+#                                 'colon':'colon',
+#                                 'd2d_breast': '08_05_2022__14_27_16',
+#                                 'd2d_AML': '08_05_2022__15_58_37',
+#                                 'd2d_colon': '08_05_2022__14_26_35',
+#                                 'd2d_ovary': '08_05_2022__14_25_49'}
 cancer_genes_datasets = ['cosmic', 'uniprot']
 
-interaction_type = sorted(['KPI', 'E3', 'EGFR', 'STKE', 'PDI'])
+# interaction_type = sorted(['KPI', 'E3', 'EGFR', 'STKE', 'PDI'])
+interaction_type = sorted(['KEGG'])
 predction_folder = path.join(root_path, 'input', 'predicted_interactions')
 consensus_threshold = 2 / 3
-ratio_threshold = 1.01
-experiments_types = ['ovary', 'AML', 'colon', 'breast']
+ratio_threshold = 1.2
+experiments_types = ['ovary']
 prediction_types = [ 'ovary', 'AML', 'colon', 'breast']
 # prediction_types = ['d2d_ovary', 'd2d_colon', 'd2d_breast', 'd2d_AML']
 redirect_output(path.join(output_file_path, 'log'))
@@ -49,7 +66,7 @@ for experiment_type in experiments_types:
         cancer_genes_dict[cancer_genes_dataset] = list(translator.translate(cancer_genes, 'symbol', 'entrez_id').values())
     cancer_genes_dict['overall'] = set(x for xx in cancer_genes_dict.values() for x in xx)
 
-    args = experiments_all_datasets
+    args = experiments_0
     args['data']['sources_filename'] = sources_filenmae_dict[experiment_type]
     args['data']['terminals_filename'] = terminals_filenmae_dict[experiment_type]
     args['data']['directed_interactions_filename'] = interaction_type
@@ -60,10 +77,12 @@ for experiment_type in experiments_types:
                   args['data']['sources_filename'], args['data']['terminals_filename'],
                   args['data']['n_experiments'], args['data']['max_set_size'], rng)
 
-
+    n_interactions = len(list(directed_interactions.index))
+    # generating datasets
+    directed_interactions_set = set(directed_interactions.index)
     predicted_edges = {}
     for name in undropped_predictions:
-        prediction_file_path = path.join(predction_folder, name, 'directed_network')
+        prediction_file_path = path.join(predction_folder, directions_predictions_files[name], 'directed_network')
         prediction = pd.read_csv(prediction_file_path, sep='\t', index_col=[0,1])
         predictions_dict = prediction[['direction_prob']].to_dict()['direction_prob']
         predicted_edges[name] = [x for x in predictions_dict.keys() if (predictions_dict[x]/(predictions_dict[(x[1],x[0])] + 1e-12) > ratio_threshold)]
@@ -78,20 +97,20 @@ for experiment_type in experiments_types:
 
     consensus_idxs = np.nonzero(np.mean(consensus_array, axis=1) >= consensus_threshold)[0]
     consensus_predictions = [idx_to_edge[idx] for idx in consensus_idxs]
+    consensus_predictions = set(consensus_predictions).union(directed_interactions_set)
     consensus_predictions_flipped = [(pair[1], pair[0]) for pair in consensus_predictions]
+
 
     overlaps = set(consensus_predictions_flipped).intersection(set(consensus_predictions))
     consensus_predictions_flipped = list(set(consensus_predictions_flipped).difference(overlaps))
-
+    directed_interactions_flipped = [(pair[1], pair[0]) for pair in directed_interactions_set]
     directed_propagation_scores, _ = propagate_directed_network(undirected_network=network,
                                                                                   directed_edges=consensus_predictions_flipped,
-                                                                                  sources=terminals,
-                                                                                  terminals=sources, args=args)
+                                                                                  sources=terminals, args=args)
 
     propagation_scores, col_id_to_idx = propagate_directed_network(undirected_network=network,
                                                                                   directed_edges=[],
-                                                                                  sources=terminals,
-                                                                                  terminals=sources, args=args)
+                                                                                  sources=terminals, args=args)
 
     single_input_results_dict = {}
 

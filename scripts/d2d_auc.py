@@ -121,12 +121,12 @@ def run(sys_args):
 
         final_stats['d2d']['final'][source_type] = {'auc': d2d_auc,
                                                     'acc': d2d_acc,
-                                                    'precision': list(d2d_precision_2),
-                                                    'recall': list(d2d_recall_2)}
+                                                    'precision': list(d2d_precision),
+                                                    'recall': list(d2d_recall)}
         final_stats['d2d_2']['final'][source_type] = {'auc':d2d_2_auc,
                                                       'acc': d2d_2_acc,
-                                                      'precision': list(d2d_precision),
-                                                      'recall': list(d2d_recall)
+                                                      'precision': list(d2d_precision_2),
+                                                      'recall': list(d2d_recall_2)
                                                       }
 
     with open(path.join(output_file_path, 'args'), 'w') as f:
