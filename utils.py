@@ -79,11 +79,17 @@ def read_directed_interactions(directed_interactions_folder, directed_interactio
         directed_interactions = directed_interactions[directed_interactions['from'] != (directed_interactions['to'])]
         all_interactions = pd.concat((all_interactions, directed_interactions))
 
-    all_interactions['edge_score'] = 0.8
-    all_interactions = all_interactions[~all_interactions.duplicated(subset=['from','to','source'], keep='first')]
 
+    all_interactions['edge_score'] = 0.8
     all_interactions.index = pd.MultiIndex.from_arrays(all_interactions[['from', 'to']].values.T)
 
+    all_interactions = all_interactions[~all_interactions.duplicated(subset=['from','to'], keep='first')]
+
+    all_interaction_set = set(list(all_interactions.index))
+    all_interaction_flipped_set = set([(x[1], x[0]) for x in all_interaction_set])
+    interactions_to_delete = list(all_interaction_flipped_set.intersection(all_interaction_set))
+    interactions_to_delete = interactions_to_delete + [(x[1], x[0]) for x in interactions_to_delete]
+    all_interactions = all_interactions.drop(interactions_to_delete)
     return all_interactions[['source', 'edge_score']]
 
 
@@ -500,7 +506,7 @@ def generate_directed_similarity_matrix(graph, directed_edge_list, alpha):
     sim_matrix.data[np.isnan(sim_matrix.data)] = 0.0
     return alpha*sim_matrix, genes
 
-def propagate_directed_network(undirected_network, directed_edges, sources, terminals, args):
+def propagate_directed_network(undirected_network, directed_edges, sources, args):
     propagate_alpha = args['propagation']['alpha']
     propagation_iterations = args['propagation']['n_iterations']
     propagation_epsilon = args['propagation']['eps']
