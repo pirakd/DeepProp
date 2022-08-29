@@ -40,8 +40,13 @@ class DeepProp(nn.Module):
                                           model_args['classifier_layers'],
                                           model_args['classifier_dropout']
                                           )
-        self.source_model = InvarianceModel(feature_extractor, model_args['pulling_func'])
-        self.terminal_model = InvarianceModel(feature_extractor, model_args['pulling_func'])
+
+        if model_args['share_source_terminal_weights']:
+            self.source_model = InvarianceModel(feature_extractor, model_args['pulling_func'])
+            self.terminal_model = self.source_model
+        else:
+            self.source_model = InvarianceModel(feature_extractor, model_args['pulling_func'])
+            self.terminal_model = InvarianceModel(feature_extractor, model_args['pulling_func'])
         self.classifier = classifier
 
     def init_feature_extractor(self, f_layers_size, dropout_rate=0):
