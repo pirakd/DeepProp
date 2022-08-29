@@ -12,8 +12,8 @@ translator = GeneTranslator()
 from presets import experiments_0
 import json
 translator.load_dictionary()
-from collections import defaultdict
 from sklearn.metrics import precision_recall_curve, auc
+
 
 def get_edge_prob(df):
     df.apply(np.log)
@@ -38,16 +38,16 @@ directions_predictions_files = {'breast': 'breast',
                                 'd2d_colon': 'd2d_colon',
                                 'd2d_ovary': 'd2d_ovary',
                                 'd2d_drug': 'd2d_drug'}
-directions_predictions_files = {'breast': '23_06_2022__20_31_55',
-                                'ovary':'23_06_2022__19_50_57',
-                                'AML':'23_06_2022__19_50_30',
-                                'colon':'25_06_2022__12_28_46',
-                                'drug': '23_06_2022__19_50_08',
-                                'd2d_breast': 'd2d_breast',
-                                'd2d_AML': 'd2d_AML',
-                                'd2d_colon': 'd2d_colon',
-                                'd2d_ovary': 'd2d_ovary',
-                                'd2d_drug': 'd2d_drug'}
+# directions_predictions_files = {'breast': '23_06_2022__20_31_55',
+#                                 'ovary':'23_06_2022__19_50_57',
+#                                 'AML':'23_06_2022__19_50_30',
+#                                 'colon':'25_06_2022__12_28_46',
+#                                 'drug': '23_06_2022__19_50_08',
+#                                 'd2d_breast': '25_06_2022__12_30_55',
+#                                 'd2d_AML': '23_06_2022__18_56_52',
+#                                 'd2d_colon': '25_06_2022__12_31_12',
+#                                 'd2d_ovary': '23_06_2022__18_56_40',
+#                                 'd2d_drug':'23_06_2022__18_07_16'}
 by_prob = False
 maximum_set_size = 10000
 minimum_set_size = 10
@@ -61,9 +61,8 @@ redirect_output(path.join(output_file_path, 'log'))
 interaction_type = sorted(['KPI', 'E3', 'EGFR', 'STKE', 'PDI'])
 # interaction_type = sorted(['KEGG'])
 predction_folder = path.join(root_path, 'input', 'predicted_interactions')
-consensus_threshold = 0.8
 threshold_type = 'ratio'
-prediction_types = ['ovary', 'AML', 'colon', 'breast', 'drug']
+prediction_types = ['ovary', 'AML', 'colon', 'breast']
 # prediction_types = ['drug']
 # prediction_types = ['d2d_ovary', 'd2d_colon', 'd2d_breast', 'd2d_AML', ]
 # prediction_types = ['d2d_ovary', 'd2d_colon', 'd2d_breast', 'd2d_AML', 'd2d_drug']
@@ -71,7 +70,6 @@ prediction_types = ['ovary', 'AML', 'colon', 'breast', 'drug']
 # prediction_types = ['d2d_ovary']
 
 args_dict = {'interaction_types':interaction_type,
-             'consensus_threshold': consensus_threshold,
              'output_file_path':output_file_path,
              'prediction_types':prediction_types}
 results_dict['args'] = args_dict
@@ -88,9 +86,17 @@ network, directed_interactions, _, _, id_to_degree = \
 network_genes = np.unique(network.ge)
 graph = nx.from_pandas_edgelist(network.reset_index(), 0, 1)
 
-n_interctions = len(list(directed_interactions.index))
-# generating datasets
-directed_interactions_set = set(directed_interactions.index)
+directed_interactions_pairs_list = np.array(directed_interactions.index)
+train_indexes, val_indexes, test_indexes = train_test_split('normal',
+                                                            len(directed_interactions_pairs_list),
+                                                            [0.8, 0.2, 0],
+                                                            random_state=rng,
+                                                            directed_interactions=directed_interactions_pairs_list)
+
+val_samples = directed_interactions_pairs_list[val_indexes]
+total_val_samples = np.concatenate([val_samples , np.array([(x[1], x[0]) for x in val_samples], dtype="i,i")])
+val_labels = [1] * len(val_samples) + [0] * len(val_samples)
+
 
 predicted_edges = []
 predictions = []
@@ -105,10 +111,23 @@ for n, name in enumerate(prediction_types):
         prediction['direction_prob'].loc[predicted_edges.keys()] = list(predicted_edges.values())
         predictions.append(prediction)
 
+merged_predictions = pd.concat(predictions)
+merged_predictions['direction_prob'] = np.log(merged_predictions['direction_prob']+ 1e-9)
+merged_predictions['direction_prob'] = merged_predictions.groupby(level=[0,1])['direction_prob'].mean()
+merged_predictions = merged_predictions.reset_index().drop_duplicates(keep='first').set_index(keys=['0', '1'])
 
-predictions = pd.concat(predictions)
-predictions['direction_prob'] = np.log(predictions['direction_prob']+ 1e-9)
-predictions['direction_prob'] = predictions.groupby(level=[0,1])['direction_prob'].mean()
-predictions = predictions.reset_index().drop_duplicates(keep='first').set_index(keys=['0', '1'])
+filtered_val_samples = []
+filtered_val_labels = []
+for i,ii in enumerate(total_val_samples):
+    if ii in merged_predictions.index:
+        filtered_val_samples.append(ii)
+        filtered_val_labels.append(val_labels[i])
+total_val_samples = [x for x in total_val_samples if x in merged_predictions.index]
+probs = merged_predictions.loc[filtered_val_samples]['direction_prob'].to_numpy()
+deep_precision, deep_recall, deep_thresholds = precision_recall_curve(filtered_val_labels, probs)
+deep_auc = auc(deep_recall, deep_precision)
 
-predictions.to_csv(path.join(output_file_path, 'edge_probs_ratio'), sep='\t')
+sorted_indexes = np.argsort(probs)[::-1]
+sorted_labels = val_labels[sorted_indexes]
+a=1
+merged_predictions.to_csv(path.join(output_file_path, 'edge_probs_ratio'), sep='\t')

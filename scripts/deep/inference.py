@@ -1,6 +1,6 @@
 from os import path
 import sys
-sys.path.append(path.dirname(path.dirname(path.realpath(__file__))))
+sys.path.append(path.dirname(path.dirname(path.dirname(path.realpath(__file__)))))
 from os import makedirs
 from deep_learning.data_loaders import LightDataset
 from deep_learning.trainer import ClassifierTrainer

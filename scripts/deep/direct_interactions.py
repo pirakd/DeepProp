@@ -2,7 +2,7 @@
 import pandas as pd
 from os import path
 import sys
-sys.path.append(path.dirname(path.dirname(path.realpath(__file__))))
+sys.path.append(path.dirname(path.dirname(path.dirname(path.realpath(__file__)))))
 from os import makedirs
 from deep_learning.data_loaders import LightDataset
 from deep_learning.trainer import ClassifierTrainer
@@ -16,7 +16,12 @@ import json
 import argparse
 import copy
 import networkx as nx
-
+from scripts.scripts_utils import sources_filenmae_dict, terminals_filenmae_dict
+deep_models_names = {'drug':'22_06_2022__17_34_07',
+                     'AML':'22_06_2022__23_20_35',
+                     'breast':'22_06_2022__19_49_38',
+                     'colon':'22_06_2022__22_06_17',
+                     'ovary':'23_06_2022__13_25_48'}
 def run(sys_args):
     root_path = get_root_path()
     output_folder = 'output'
@@ -24,9 +29,9 @@ def run(sys_args):
     makedirs(output_file_path, exist_ok=True)
     redirect_output(path.join(output_file_path, 'log'))
 
-    model_args_path = path.join(root_path, 'input', 'models', sys_args.model_name, 'args')
-    model_results_path = path.join(root_path, 'input', 'models', sys_args.model_name, 'results')
-    model_path = path.join(root_path, 'input', 'models', sys_args.model_name, 'model')
+    model_args_path = path.join(root_path, 'input', 'models','deep', deep_models_names[sys_args.experiments_type], 'args')
+    model_results_path = path.join(root_path, 'input', 'models','deep', deep_models_names[sys_args.experiments_type], 'results')
+    model_path = path.join(root_path, 'input', 'models','deep', deep_models_names[sys_args.experiments_type], 'model')
 
     with open(model_args_path, 'r') as f:
         args = json.load(f)
@@ -39,6 +44,7 @@ def run(sys_args):
     args['data']['prop_scores_filename'] = sys_args.prop_scores_filename
     args['train']['train_val_test_split'] = sys_args.train_val_test_split
     args['data']['directed_interactions_filename'] = sys_args.directed_interactions_filename
+
     model = load_model(model_path, args).to(device)
     rng = np.random.RandomState(args['data']['random_seed'])
 
@@ -66,7 +72,7 @@ def run(sys_args):
     propagation_scores, row_id_to_idx, col_id_to_idx, _ = \
         gen_propagation_scores(args, network, sources, terminals, genes_ids_to_keep, directed_interactions_pairs_list, calc_normalization_constants=False)
 
-    train_indexes, val_indexes, test_indexes = train_test_split(args['data']['split_type'],len(directed_interactions_pairs_list), args['train']['train_val_test_split'],
+    train_indexes, val_indexes, test_indexes = train_test_split(args['data']['split_type'],len(directed_interactions_pairs_list), [0,0,1],
                                                                 random_state=rng, directed_interactions=directed_interactions_pairs_list)
 
     test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores,
@@ -111,25 +117,23 @@ def run(sys_args):
     directed_network = pd.concat([network, network_reverse])
     directed_network['direction_prob'] = [directed_edge_prob.get((x[0],x[1]), 0) for x in list(directed_network.index)]
     directed_network.reset_index().to_csv(path.join(output_file_path, 'directed_network'), sep='\t', header=True, index=False)
+    args['model_path'] = model_path
+    args['n_experimetns'] = model.n_experiments
 
-    results_dict = {'n_experiments': model.n_experiments, 'model_path': model_path}
-    with open(path.join(output_file_path, 'results'), 'w') as f:
-        json.dump(results_dict, f, indent=4, separators=(',', ': '))
     with open(path.join(output_file_path, 'args'), 'w') as f:
         json.dump(args, f, indent=4, separators=(',', ': '))
 
 if __name__ == '__main__':
     input_type = 'drug'
-    n_exp = 5
+    n_exp = 0
     split = [0.99, 0, 0.01]
 
     interaction_type = sorted(['KPI', 'E3', 'EGFR', 'STKE', 'PDI'])
-    interaction_type = sorted(['KEGG'])
-    interaction_type = sorted(['KPI'])
+
 
     # interaction_type = 'yeast_KPI'
     device = 'cpu'
-    model_name = 'drug_KEGG_5'
+    model_name = ''
     # prop_scores_filename = 'yeast_KPI_direct'
     # prop_scores_filename = 'ovary_E3_EGFR_KPI_STKE_direct'
     prop_scores_filename = ''
@@ -150,9 +154,8 @@ if __name__ == '__main__':
                         help='number of dataloader workers', default=0)
     sys_args = parser.parse_args()
     sys_args.prop_scores_filename = sys_args.experiments_type + '_' + '_'.join(sys_args.directed_interactions_filename) + '_{}_direct'.format(sys_args.n_experiments)
-    sys_args.model_name = sys_args.experiments_type + '_' + '_'.join(sys_args.directed_interactions_filename) + '_{}'.format(sys_args.n_experiments)
 
     # sys_args.save_prop_scores =  True
-    # sys_args.load_prop_scores =  True
+    sys_args.load_prop_scores =  True
 
     run(sys_args)

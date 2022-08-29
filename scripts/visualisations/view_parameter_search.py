@@ -9,7 +9,6 @@ from utils import get_time
 from functools import reduce
 import operator
 import datetime
-
 model_args = ['classifier_layers', 'feature_extractor_layers', 'exp_emb_size', 'feature_extractor_dropout',
               'classifier_dropout', 'pair_degree_feature']
 train_args = ['intermediate_loss_weight', 'learning_rate', 'train_batch_size']
@@ -119,7 +118,7 @@ if __name__ == '__main__':
     makedirs(output_dir, exist_ok=True)
 
     root_path = get_root_path()
-    result_list = read_results(path.join(root_path,'output', 'parameter_search'), '15_04_2022__01_01_01')
+    result_list = read_results(path.join(root_path,'output', 'parameter_search'), '27_04_2022__01_01_01')
     results_df = insert_to_data_frame(result_list, fields_to_keep)
     results_df.fillna(0, inplace=True)
     sorted = results_df.sort_values(by=metric_name, ascending=False)
@@ -129,4 +128,3 @@ if __name__ == '__main__':
 
     metric = sorted[metric_name].to_numpy()
     plot_quantiles(metric)
-

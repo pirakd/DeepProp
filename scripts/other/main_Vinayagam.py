@@ -1,21 +1,20 @@
 from os import path
 import sys
-sys.path.append(path.dirname(path.dirname(path.realpath(__file__))))
+sys.path.append(path.dirname(path.dirname(path.dirname(path.realpath(__file__)))))
 from os import path, makedirs
 import torch
 from utils import read_data, get_root_path, train_test_split, get_time, \
     gen_propagation_scores, redirect_output
-import pandas as pd
-import networkx as nx
+from Vinayagam import generate_vinyagam_feature, count_sp_edges, infer_vinayagam
 import numpy as np
-from sklearn.metrics import precision_recall_curve, auc
-from presets import experiments_20, experiments_50, experiments_0
+from presets import experiments_0
 import json
 import argparse
 from scripts.scripts_utils import sources_filenmae_dict, terminals_filenmae_dict
-from collections import defaultdict
+import pickle
+import networkx as nx
+import pandas as pd
 from gene_name_translator.gene_translator import GeneTranslator
-from Vinayagam import generate_vinyagam_feature, count_sp_edges, infer_vinayagam
 
 
 def run(sys_args):
@@ -29,6 +28,11 @@ def run(sys_args):
 
     n_experiments = sys_args.n_experiments
     args = experiments_0
+
+    if sys_args.device:
+        device = torch.device("cuda:{}".format(sys_args.device))
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
     args['data']['load_prop_scores'] = sys_args.load_prop_scores
@@ -50,10 +54,6 @@ def run(sys_args):
                   args['data']['n_experiments'], args['data']['max_set_size'], rng)
     n_experiments = len(sources)
 
-    # merged_network = pandas.concat([directed_interactions, network.drop(directed_interactions.index & network.index)])
-    directed_interactions_pairs_list = np.array(directed_interactions.index)
-    directed_interactions_source_type = np.array(directed_interactions.source)
-
     transcription_factors_df = pd.read_csv(path.join(get_root_path(), 'input', 'other', 'transcription_factors.tsv'), sep='\t')
     receptors_df = pd.read_csv(path.join(get_root_path(), 'input', 'other', 'receptors.tsv'), sep='\t')
     transcription_factors_df['DBD'] = transcription_factors_df['DBD'].str.split(';').str[0]
@@ -73,80 +73,46 @@ def run(sys_args):
     network['edge_score'] = 1-network['edge_score']
     graph = nx.from_pandas_edgelist(network.reset_index(), 0, 1, 'edge_score')
 
+    directed_interactions_pairs_list = np.array(directed_interactions.index)
+    directed_interactions_source_type = np.array(directed_interactions.source)
+
     counts, grouped_counts = count_sp_edges(graph, receptor_groups, tf_groups)
-    probs_list, labels_list, probs_list, labels_list = [
-        defaultdict(list) for x in range(4)]
-    folds_stats, folds_stats = [], []
 
-    for fold in range(n_folds):
-        print('\n Evaluating Fold {} \n'.format(fold))
+    train_indexes, val_indexes, test_indexes = train_test_split(args['data']['split_type'],
+                                                                len(directed_interactions_pairs_list),
+                                                                args['train']['train_val_test_split'],
+                                                                random_state=rng)  # feature generation
+    train_indexes = np.concatenate([train_indexes, val_indexes])
+    train_indexes=np.arange(len(directed_interactions_pairs_list))
 
-        #evaluation
-        train_indexes, val_indexes, test_indexes = train_test_split(args['data']['split_type'],
-                                                                    len(directed_interactions_pairs_list),
-                                                                    args['train']['train_val_test_split'],
-                                                                    random_state=rng)  # feature generation
-        train_indexes = np.concatenate([train_indexes, val_indexes])
+    train_features, train_labels = generate_vinyagam_feature(graph, counts, grouped_counts, directed_interactions_pairs_list[train_indexes])
+    test_features, test_labels = generate_vinyagam_feature(graph, counts, grouped_counts, directed_interactions_pairs_list[test_indexes])
+    results_dict, model = infer_vinayagam(train_features, train_labels, test_features, test_labels, directed_interactions_source_type[test_indexes])
+    # merged_network = pandas.concat([directed_interactions, network.drop(directed_interactions.index & network.index)])
 
-        train_features, train_labels = generate_vinyagam_feature(graph, counts, grouped_counts,
-                                                                 directed_interactions_pairs_list[train_indexes])
-        test_features, test_labels = generate_vinyagam_feature(graph, counts, grouped_counts,
-                                                               directed_interactions_pairs_list[test_indexes])
-        results_dict, model = infer_vinayagam(train_features, train_labels, test_features, test_labels,
-                                              directed_interactions_source_type[test_indexes])
-        # merged_network = pandas.concat([directed_interactions, network.drop(directed_interactions.index & network.index)])
 
-        vinayagam_stats = ({type: {x: xx for x, xx in values.items() if x in ['acc', 'auc']} for type, values in
+    vinayagam_stats= ({type: {x: xx for x, xx in values.items() if x in ['acc', 'auc']} for type, values in
                             results_dict.items()})
 
-        folds_stats.append({type: {x: xx for x, xx in values.items() if x in ['acc', 'auc']} for type, values in
-                                results_dict.items()})
 
-
-        for key in results_dict.keys():
-            probs_list[key].append(results_dict[key]['probs'][:, 1])
-            labels_list[key].append(results_dict[key]['labels'])
-            probs_list[key].append(results_dict[key]['probs'][:, 1])
-            labels_list[key].append(results_dict[key]['labels'])
-
-    final_stats =  {'vinayagam': {'folds_stats': folds_stats, 'final': {}, }}
-
-    probs_by_type, labels_by_type = [
-        defaultdict(list) for x in range(2)]
-    for source_type in results_dict.keys():
-        probs_by_type[source_type] = np.hstack(probs_list[source_type])
-        labels_by_type[source_type] = np.hstack(labels_list[source_type])
-
-        acc = np.mean((np.array(probs_by_type[source_type]) > 0.5).astype(int) == labels_by_type[source_type])
-        precision, recall, thresholds = precision_recall_curve(labels_by_type[source_type],
-                                                                           probs_by_type[source_type])
-
-        _auc = auc(recall, precision)
-        if len(precision) == 2:
-            _auc = 0.5
-            precision = [0.5, 0.5]
-
-
-
-        final_stats['vinayagam']['final'][source_type] = {'auc': _auc,
-                                                    'acc': acc,
-                                                    'precision': list(precision),
-                                                    'recall': list(recall)}
+    models = {'model':model}
 
     with open(path.join(output_file_path, 'args'), 'w') as f:
         json.dump(args, f, indent=4, separators=(',', ': '))
     with open(path.join(output_file_path, 'results'), 'w') as f:
-        json.dump(final_stats, f, indent=4, separators=(',', ': '))
+        json.dump(vinayagam_stats, f, indent=4, separators=(',', ': '))
+    with open(path.join(output_file_path, 'vinayagam_model'), 'wb') as f:
+        pickle.dump(models, f)
 
 
 if __name__ == '__main__':
     n_folds = 5
-    input_type = 'drug'
+    input_type = 'AML'
     load_prop = False
     save_prop = False
-    n_exp = 2
+    n_exp = 0
     split = [0.66, 0.14, 0.2]
-    interaction_type = ['KPI', 'STKE']
+    interaction_type = ['KPI', 'STKE', 'PDI', 'E3', 'EGFR']
     prop_scores_filename = 'drug_KPI'
 
     parser = argparse.ArgumentParser()
@@ -173,6 +139,6 @@ if __name__ == '__main__':
     args.directed_interactions_filename = sorted(args.directed_interactions_filename)
     args.prop_scores_filename = args.experiments_type + '_' + '_'.join(args.directed_interactions_filename) + '_{}'.format(args.n_experiments)
 
-    args.load_prop_scores =  True
+    # args.load_prop_scores = True
     # args.save_prop_scores = True
     run(args)

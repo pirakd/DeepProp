@@ -1,6 +1,6 @@
 from os import path
 import sys
-sys.path.append(path.dirname(path.dirname(path.realpath(__file__))))
+sys.path.append(path.dirname(path.dirname(path.dirname(path.realpath(__file__)))))
 from os import path, makedirs
 import torch
 from utils import read_data, get_root_path, train_test_split, get_time, \
@@ -12,7 +12,6 @@ import json
 import argparse
 from scripts.scripts_utils import sources_filenmae_dict, terminals_filenmae_dict
 import pickle
-
 
 def run(sys_args):
     output_folder = 'output'
@@ -97,12 +96,10 @@ def run(sys_args):
 if __name__ == '__main__':
     n_folds = 5
     input_type = 'drug'
-    load_prop = False
-    save_prop = False
-    n_exp = 2
+    n_exp = 0
     split = [0.66, 0.14, 0.2]
-    interaction_type = ['KPI', 'STKE']
-    prop_scores_filename = 'drug_KPI'
+    interaction_type = sorted(['KPI', 'E3', 'EGFR', 'STKE', 'PDI'])
+    prop_scores_filename = input_type + '_' + '_'.join(interaction_type) + '_{}'.format(n_exp)
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ex', '--ex_type', dest='experiments_type', type=str,

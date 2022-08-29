@@ -1,4 +1,6 @@
+import sys
 from os import listdir, path, makedirs
+sys.path.append(path.dirname(path.dirname(path.dirname(path.realpath(__file__)))))
 import json
 from utils import get_root_path
 import numpy as np

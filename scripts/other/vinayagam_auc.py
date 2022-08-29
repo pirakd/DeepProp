@@ -1,11 +1,12 @@
 from os import path
 import sys
-sys.path.append(path.dirname(path.dirname(path.realpath(__file__))))
+sys.path.append(path.dirname(path.dirname(path.dirname(path.realpath(__file__)))))
 from os import path, makedirs
 import torch
 from utils import read_data, get_root_path, train_test_split, get_time, \
     gen_propagation_scores, redirect_output
-from D2D import eval_D2D, eval_D2D_2, generate_D2D_features_from_propagation_scores
+import pandas as pd
+import networkx as nx
 import numpy as np
 from sklearn.metrics import precision_recall_curve, auc
 from presets import experiments_20, experiments_50, experiments_0
@@ -13,8 +14,14 @@ import json
 import argparse
 from scripts.scripts_utils import sources_filenmae_dict, terminals_filenmae_dict
 from collections import defaultdict
+from gene_name_translator.gene_translator import GeneTranslator
+from Vinayagam import generate_vinyagam_feature, count_sp_edges, infer_vinayagam
+
 
 def run(sys_args):
+    gene_translator = GeneTranslator(verbosity=True)
+    gene_translator.load_dictionary()
+
     output_folder = 'output'
     output_file_path = path.join(get_root_path(), output_folder, path.basename(__file__).split('.')[0], get_time())
     makedirs(output_file_path, exist_ok=True)
@@ -23,10 +30,6 @@ def run(sys_args):
     n_experiments = sys_args.n_experiments
     args = experiments_0
 
-    if sys_args.device:
-        device = torch.device("cuda:{}".format(sys_args.device))
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     args['data']['load_prop_scores'] = sys_args.load_prop_scores
     args['data']['save_prop_scores'] = sys_args.save_prop_scores
@@ -50,84 +53,85 @@ def run(sys_args):
     # merged_network = pandas.concat([directed_interactions, network.drop(directed_interactions.index & network.index)])
     directed_interactions_pairs_list = np.array(directed_interactions.index)
     directed_interactions_source_type = np.array(directed_interactions.source)
-    genes_ids_to_keep = sorted(list(set([x for pair in directed_interactions_pairs_list for x in pair])))
 
-    propagation_scores, row_id_to_idx, col_id_to_idx, normalization_constants_dict = \
-        gen_propagation_scores(args, network, sources, terminals, genes_ids_to_keep, directed_interactions_pairs_list)
+    transcription_factors_df = pd.read_csv(path.join(get_root_path(), 'input', 'other', 'transcription_factors.tsv'), sep='\t')
+    receptors_df = pd.read_csv(path.join(get_root_path(), 'input', 'other', 'receptors.tsv'), sep='\t')
+    transcription_factors_df['DBD'] = transcription_factors_df['DBD'].str.split(';').str[0]
+    receptors_df['Classification'] = receptors_df['Classification']
+    all_transcription_factors = transcription_factors_df['Symbol'].to_list()
+    all_receptors = receptors_df['Entrez_ID'].to_list()
+    symbol_to_entrez = gene_translator.translate(all_transcription_factors, 'symbol', 'entrez_id')
+    entrez_to_entrez = gene_translator.translate(all_receptors, 'entrez_id', 'entrez_id')
 
-    d2d_2_probs_list, d2d_2_labels_list, d2d_probs_list, d2d_labels_list = [
+    transcription_factors_df['Symbol'] = transcription_factors_df['Symbol'].apply(lambda x: symbol_to_entrez.get(x, None))
+    receptors_df['Entrez_ID'] = receptors_df['Entrez_ID'].apply(lambda x: entrez_to_entrez.get(x, None))
+    transcription_factors_df.rename(columns={'Symbol':'Entrez_ID'}, inplace=True)
+    transcription_factors_df.dropna(inplace=True)
+    tf_groups = transcription_factors_df.set_index('Entrez_ID').to_dict()['DBD']
+    receptor_groups = receptors_df.set_index('Entrez_ID').to_dict()['Classification']
+    transcription_factors_df.to_dict()
+    network['edge_score'] = 1-network['edge_score']
+    graph = nx.from_pandas_edgelist(network.reset_index(), 0, 1, 'edge_score')
+
+    counts, grouped_counts = count_sp_edges(graph, receptor_groups, tf_groups)
+    probs_list, labels_list, probs_list, labels_list = [
         defaultdict(list) for x in range(4)]
-    d2d_2_folds_stats, d2d_folds_stats = [], []
+    folds_stats, folds_stats = [], []
 
     for fold in range(n_folds):
         print('\n Evaluating Fold {} \n'.format(fold))
+
+        #evaluation
         train_indexes, val_indexes, test_indexes = train_test_split(args['data']['split_type'],
                                                                     len(directed_interactions_pairs_list),
                                                                     args['train']['train_val_test_split'],
                                                                     random_state=rng)  # feature generation
-        d2d_train_indexes = np.concatenate([train_indexes, val_indexes])
+        train_indexes = np.concatenate([train_indexes, val_indexes])
 
-        # d2d evaluation
-        sources_indexes = [[row_id_to_idx[gene_id] for gene_id in gene_set] for gene_set in sources.values()]
-        terminals_indexes = [[row_id_to_idx[gene_id] for gene_id in gene_set] for gene_set in terminals.values()]
-        pairs_indexes = [(col_id_to_idx[pair[0]], col_id_to_idx[pair[1]]) for pair in directed_interactions_pairs_list]
-        features, deconstructed_features = generate_D2D_features_from_propagation_scores(propagation_scores,
-                                                                                         pairs_indexes,
-                                                                                         sources_indexes,
-                                                                                         terminals_indexes)
-        d2d_results_dict, model = eval_D2D(features[d2d_train_indexes], features[test_indexes],
-                                           directed_interactions_source_type[test_indexes])
-        d2d_2_results_dict, model = eval_D2D_2(deconstructed_features[d2d_train_indexes],
-                                               deconstructed_features[test_indexes],
-                                               directed_interactions_source_type[test_indexes])
-        d2d_folds_stats.append({type: {x: xx for x, xx in values.items() if x in ['acc', 'auc']} for type, values in
-                                d2d_results_dict.items()})
-        d2d_2_folds_stats.append({type: {x: xx for x, xx in values.items() if x in ['acc', 'auc']} for type, values in
-                                  d2d_2_results_dict.items()})
+        train_features, train_labels = generate_vinyagam_feature(graph, counts, grouped_counts,
+                                                                 directed_interactions_pairs_list[train_indexes])
+        test_features, test_labels = generate_vinyagam_feature(graph, counts, grouped_counts,
+                                                               directed_interactions_pairs_list[test_indexes])
+        results_dict, model = infer_vinayagam(train_features, train_labels, test_features, test_labels,
+                                              directed_interactions_source_type[test_indexes])
+        # merged_network = pandas.concat([directed_interactions, network.drop(directed_interactions.index & network.index)])
 
-        for key in d2d_results_dict.keys():
-            d2d_probs_list[key].append(d2d_results_dict[key]['probs'][:, 1])
-            d2d_labels_list[key].append(d2d_results_dict[key]['labels'])
-            d2d_2_probs_list[key].append(d2d_2_results_dict[key]['probs'][:, 1])
-            d2d_2_labels_list[key].append(d2d_2_results_dict[key]['labels'])
+        vinayagam_stats = ({type: {x: xx for x, xx in values.items() if x in ['acc', 'auc']} for type, values in
+                            results_dict.items()})
 
-    final_stats =  {'d2d': {'folds_stats': d2d_folds_stats, 'final': {}, },
-                   'd2d_2': {'folds_stats': d2d_2_folds_stats, 'final': {} }}
+        folds_stats.append({type: {x: xx for x, xx in values.items() if x in ['acc', 'auc']} for type, values in
+                                results_dict.items()})
 
-    d2d_2_probs_by_type, d2d_2_labels_by_type, d2d_probs_by_type, d2d_labels_by_type = [
-        defaultdict(list) for x in range(4)]
-    for source_type in d2d_results_dict.keys():
-        d2d_probs_by_type[source_type] = np.hstack(d2d_probs_list[source_type])
-        d2d_labels_by_type[source_type] = np.hstack(d2d_labels_list[source_type])
-        d2d_2_probs_by_type[source_type] = np.hstack(d2d_2_probs_list[source_type])
-        d2d_2_labels_by_type[source_type] = np.hstack(d2d_2_labels_list[source_type])
-        d2d_acc = np.mean((np.array(d2d_probs_by_type[source_type]) > 0.5).astype(int) == d2d_labels_by_type[source_type])
-        d2d_2_acc = np.mean((np.array(d2d_2_probs_by_type[source_type]) > 0.5).astype(int) == d2d_2_labels_by_type[source_type])
 
-        d2d_precision, d2d_recall, d2d_thresholds = precision_recall_curve(d2d_labels_by_type[source_type],
-                                                                           d2d_probs_by_type[source_type])
+        for key in results_dict.keys():
+            probs_list[key].append(results_dict[key]['probs'][:, 1])
+            labels_list[key].append(results_dict[key]['labels'])
+            probs_list[key].append(results_dict[key]['probs'][:, 1])
+            labels_list[key].append(results_dict[key]['labels'])
 
-        d2d_auc = auc(d2d_recall, d2d_precision)
-        if len(d2d_precision) == 2:
-            d2d_auc = 0.5
-            d2d_precision = [0.5, 0.5]
+    final_stats =  {'vinayagam': {'folds_stats': folds_stats, 'final': {}, }}
 
-        d2d_precision_2, d2d_recall_2, d2d_thresholds_2 = precision_recall_curve(d2d_2_labels_by_type[source_type],
-                                                                                 d2d_2_probs_by_type[source_type])
-        d2d_2_auc = auc(d2d_recall_2, d2d_precision_2)
-        if len(d2d_precision_2) == 2:
-            d2d_2_auc = 0.5
-            d2d_precision_2 = [0.5, 0.5]
+    probs_by_type, labels_by_type = [
+        defaultdict(list) for x in range(2)]
+    for source_type in results_dict.keys():
+        probs_by_type[source_type] = np.hstack(probs_list[source_type])
+        labels_by_type[source_type] = np.hstack(labels_list[source_type])
 
-        final_stats['d2d']['final'][source_type] = {'auc': d2d_auc,
-                                                    'acc': d2d_acc,
-                                                    'precision': list(d2d_precision),
-                                                    'recall': list(d2d_recall)}
-        final_stats['d2d_2']['final'][source_type] = {'auc':d2d_2_auc,
-                                                      'acc': d2d_2_acc,
-                                                      'precision': list(d2d_precision_2),
-                                                      'recall': list(d2d_recall_2)
-                                                      }
+        acc = np.mean((np.array(probs_by_type[source_type]) > 0.5).astype(int) == labels_by_type[source_type])
+        precision, recall, thresholds = precision_recall_curve(labels_by_type[source_type],
+                                                                           probs_by_type[source_type])
+
+        _auc = auc(recall, precision)
+        if len(precision) == 2:
+            _auc = 0.5
+            precision = [0.5, 0.5]
+
+
+
+        final_stats['vinayagam']['final'][source_type] = {'auc': _auc,
+                                                    'acc': acc,
+                                                    'precision': list(precision),
+                                                    'recall': list(recall)}
 
     with open(path.join(output_file_path, 'args'), 'w') as f:
         json.dump(args, f, indent=4, separators=(',', ': '))

@@ -1,28 +1,28 @@
 from os import path
 import sys
-sys.path.append(path.dirname(path.dirname(path.realpath(__file__))))
+sys.path.append(path.dirname(path.dirname(path.dirname(path.realpath(__file__)))))
 from os import makedirs
-from deep_learning.models import DeepPropClassifier, DeepProp
 from deep_learning.data_loaders import LightDataset
-import json
+from deep_learning.models import DeepPropClassifier, DeepProp
 from deep_learning.trainer import ClassifierTrainer
 from torch import nn
 from torch.utils.data import DataLoader
+from torch.optim import Adam
 from utils import read_data, log_results, get_time, get_root_path, train_test_split, get_loss_function,\
-    gen_propagation_scores, redirect_output, get_optimizer, save_model
+    gen_propagation_scores, redirect_output
 import torch
 import numpy as np
-from presets import experiments_20, experiments_50, experiments_0, experiments_all_datasets
+from presets import experiments_20, experiments_50, experiments_0
 from scripts.scripts_utils import sources_filenmae_dict, terminals_filenmae_dict
 import argparse
 
 
 def run(sys_args):
-    root_path = get_root_path()
     output_folder = 'output'
     output_file_path = path.join(get_root_path(), output_folder, path.basename(__file__).split('.')[0], get_time())
     makedirs(output_file_path, exist_ok=True)
     redirect_output(path.join(output_file_path, 'log'))
+
     n_experiments = sys_args.n_experiments
 
     if  n_experiments == 0:
@@ -30,13 +30,9 @@ def run(sys_args):
     elif n_experiments <= 30:
         args = experiments_20
     else:
-        args = experiments_0
+        args = experiments_50
 
-    if sys_args.device:
-        device = torch.device("cuda:{}".format(sys_args.device))
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     args['data']['load_prop_scores'] = sys_args.load_prop_scores
     args['data']['save_prop_scores'] = sys_args.save_prop_scores
     args['data']['prop_scores_filename'] = sys_args.prop_scores_filename
@@ -45,14 +41,15 @@ def run(sys_args):
     args['data']['sources_filename'] = sources_filenmae_dict[sys_args.experiments_type]
     args['data']['terminals_filename'] = terminals_filenmae_dict[sys_args.experiments_type]
     args['data']['n_experiments']  = n_experiments
+    args['data']['network_filename'] = 'S_cerevisiae.net'
     rng = np.random.RandomState(args['data']['random_seed'])
-    print(json.dumps(args, indent=4))
 
     # data read
     network, directed_interactions, sources, terminals, id_to_degree =\
         read_data(args['data']['network_filename'], args['data']['directed_interactions_filename'],
                   args['data']['sources_filename'], args['data']['terminals_filename'],
-                  args['data']['n_experiments'], args['data']['max_set_size'], rng)
+                  args['data']['n_experiments'], args['data']['max_set_size'], rng, False,
+                  args['data']['balance_dataset'])
 
     n_experiments = len(sources.keys())
     directed_interactions_pairs_list = np.array(directed_interactions.index)
@@ -69,50 +66,44 @@ def run(sys_args):
                                  sources, terminals, args['data']['normalization_method'],
                                  normalization_constants_dict, degree_feature_normalization_constants=None,
                                  pairs_source_type=directed_interactions_source_type, id_to_degree=id_to_degree)
-    train_loader = DataLoader(train_dataset, batch_size=args['train']['train_batch_size'], shuffle=True, pin_memory=False, num_workers=sys_args.n_workers)
-
     degree_normalization_constants = {'lmbda': train_dataset.degree_normalizer.lmbda,
                                       'mean':train_dataset.degree_normalizer.lmbda,
                                       'std':train_dataset.degree_normalizer.std}
+
+    train_loader = DataLoader(train_dataset, batch_size=args['train']['train_batch_size'], shuffle=True, pin_memory=False
+                              ,num_workers=sys_args.n_workers)
     val_dataset = LightDataset(row_id_to_idx, col_id_to_idx,
                                propagation_scores, directed_interactions_pairs_list[val_indexes],
                                sources, terminals, args['data']['normalization_method'],
                                normalization_constants_dict, degree_normalization_constants,
                                directed_interactions_source_type[val_indexes], id_to_degree)
-    val_loader = DataLoader(val_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=False, num_workers=sys_args.n_workers)
-    test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores,
-                                directed_interactions_pairs_list[test_indexes],
-                                sources, terminals, args['data']['normalization_method'],
-                                normalization_constants_dict, degree_normalization_constants,
-                                directed_interactions_source_type[test_indexes], id_to_degree)
-    test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=False, num_workers=sys_args.n_workers)
+    val_loader = DataLoader(val_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=False,
+                            num_workers=sys_args.n_workers)
+    if len(test_indexes):
+        test_dataset = LightDataset(row_id_to_idx, col_id_to_idx, propagation_scores,
+                                    directed_interactions_pairs_list[test_indexes],
+                                    sources, terminals, args['data']['normalization_method'],
+                                    normalization_constants_dict, degree_normalization_constants,
+                                    directed_interactions_source_type[test_indexes], id_to_degree)
+        test_loader = DataLoader(test_dataset, batch_size=args['train']['test_batch_size'], shuffle=False, pin_memory=False,)
 
-    models_list = []
-    train_stats_list = []
-    for i in range(sys_args.n_models):
-        print('Training model {}'.format(i))
-        # init model
-        deep_prop_model = DeepProp(args['model'], n_experiments)
-        model = DeepPropClassifier(deep_prop_model).to(device)
+    # init model
+    deep_prop_model = DeepProp(args['model'], n_experiments)
+    model = DeepPropClassifier(deep_prop_model).to(device)
 
-        # init train
-        optimizer = get_optimizer(args['train']['optimizer'])
-        optimizer = optimizer(filter(lambda p: p.requires_grad, model.parameters()), lr=args['train']['learning_rate'])
-        intermediate_loss_type = get_loss_function(args['train']['intermediate_loss_type'],
-                                                   focal_gamma=args['train']['focal_gamma'])
-        trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyLoss(reduction='sum'), intermediate_criteria=intermediate_loss_type,
-                                    intermediate_loss_weight=args['train']['intermediate_loss_weight'],
-                                    optimizer=optimizer, eval_metric=None, eval_interval=args['train']['eval_interval'], device=device)
-        # train
-        train_stats, best_model = trainer.train(train_loader=train_loader, eval_loader=val_loader, model=model,
-                                                max_evals_no_improvement=args['train']['max_evals_no_imp'])
-        models_list.append(best_model)
-        train_stats_list.append(train_stats)
+    # init train
+    optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args['train']['learning_rate'])
+    intermediate_loss_type = get_loss_function(args['train']['intermediate_loss_type'],
+                                               focal_gamma=args['train']['focal_gamma'])
+    trainer = ClassifierTrainer(args['train']['n_epochs'], criteria=nn.CrossEntropyLoss(reduction='sum'), intermediate_criteria=intermediate_loss_type,
+                                intermediate_loss_weight=args['train']['intermediate_loss_weight'],
+                                optimizer=optimizer, eval_metric=None, eval_interval=args['train']['eval_interval'], device=device)
 
-    best_model_idx = np.argmax([x['best_auc'] for x in train_stats_list])
-    best_model = models_list[best_model_idx]
-    train_stats = train_stats_list[best_model_idx]
-    if len(test_dataset):
+    # train
+    train_stats, best_model = trainer.train(train_loader=train_loader, eval_loader=val_loader, model=model,
+                                            max_evals_no_improvement=args['train']['max_evals_no_imp'])
+
+    if len(test_indexes):
         test_results_dict = \
             trainer.eval_by_source(best_model, test_loader)
         print(test_results_dict)
@@ -121,20 +112,20 @@ def run(sys_args):
 
     results_dict = {'train_stats': train_stats, 'test_stats': test_results_dict, 'n_experiments': n_experiments,
                     'normalization_constants_dicts': {'samples': normalization_constants_dict, 'degrees': degree_normalization_constants}}
-    with open(path.join(output_file_path, 'args'), 'w') as f:
-        json.dump(args, f, indent=4, separators=(',', ': '))
-    with open(path.join(output_file_path, 'results'), 'w') as f:
-        json.dump(results_dict, f, indent=4, separators=(',', ': '))
-    save_model(path.join(output_file_path, 'model'), best_model)
+    log_results(output_file_path,  args, results_dict, best_model)
+
+
 if __name__ == '__main__':
-    n_models = 1
-    input_type = 'drug'
-    n_exp = 2
+    input_type = 'yeast'
+    load_prop = False
+    save_prop = False
+    n_exp = 0
     split = [0.8, 0.2, 0]
-    interaction_type = sorted(['KPI', 'E3', 'EGFR', 'STKE', 'PDI', 'KEGG'])
-    # interaction_type = sorted(['KEGG'])
-    device = None
-    prop_scores_filename = input_type + '_' + '_'.join(interaction_type) + '_{}'.format(n_exp)
+
+    interaction_type = ['yeast_KPI']
+    # interaction_type = ['STKE']
+    device = 'cpu'
+    prop_scores_filename = ''.join(interaction_type) + '_'.format(n_exp)
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ex', '--ex_type', dest='experiments_type', type=str, help='name of experiment type(drug, colon, etc.)', default=input_type)
@@ -143,17 +134,14 @@ if __name__ == '__main__':
     parser.add_argument('-l', '--load_prop', dest='load_prop_scores',  action='store_true', default=False, help='Whether to load prop scores')
     parser.add_argument('-sp', '--split', dest='train_val_test_split',  nargs=3, help='[train, val, test] sums to 1', default=split, type=float)
     parser.add_argument('-d', '--device', type=str, help='cpu or gpu number',  default=device)
-    parser.add_argument('-in', '--inter_file', dest='directed_interactions_filename', nargs='*', type=str,
-                        help='KPI/STKE', default=interaction_type)
+    parser.add_argument('-in', '--inter_file', dest='directed_interactions_filename', type=str, help='KPI/STKE',
+                        default=interaction_type)
     parser.add_argument('-p', '--prop_file', dest='prop_scores_filename', type=str,
                         help='Name of prop score file(save/load)', default=prop_scores_filename)
-    parser.add_argument('--n_models', dest='n_models', type=int,
-                        help='number_of_models_to_train', default=n_models)
     parser.add_argument('-w', dest='n_workers', type=int,
                         help='number of dataloader workers', default=0)
+
     args = parser.parse_args()
-    args.prop_scores_filename = args.experiments_type + '_' + '_'.join(args.directed_interactions_filename) + '_{}'.format(args.n_experiments)
     # args.load_prop_scores = True
     args.save_prop_scores = True
     run(args)
-
