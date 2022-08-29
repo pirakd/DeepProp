@@ -420,7 +420,7 @@ def get_root_path():
 
 
 def get_time():
-    return datetime.today().strftime('%d_%m_%Y__%H_%M_%S')
+    return datetime.today().strftime('%d_%m_%Y__%H_%M_%S_%f')[:-3]
 
 
 def log_results(output_path, args, results_dict, model=None):
@@ -486,8 +486,24 @@ class Logger(object):
         # you might want to specify some extra behavior here.
         pass
 
-def tweak_undirected_network(undirected_network, directed_edges, alpha):
-    return 1
+
+def generate_partially_directed_similarity_matrix(graph, prob_ratios, alpha):
+    genes = sorted(graph.nodes)
+    gene_indexes = dict([(gene, index) for (index, gene) in enumerate(genes)])
+    matrix = nx.to_scipy_sparse_matrix(graph, genes, weight='edge_score')
+    for pair, ratio in prob_ratios.items():
+        head, tail = pair[0], pair[1]
+        pair_indexes = gene_indexes[head], gene_indexes[tail]
+
+        #  remove opposite direction, row=to, column=from
+        # if edge (1,4) is directed then we zeroise index [1,4]
+        matrix[pair_indexes[0], pair_indexes[1]] = matrix[pair_indexes[0], pair_indexes[1]] * ratio
+
+    norm_matrix = scipy.sparse.diags(1 / matrix.sum(0).A1)
+    sim_matrix = matrix * norm_matrix
+    sim_matrix.data[np.isnan(sim_matrix.data)] = 0.0
+    return alpha*sim_matrix, genes
+
 
 def generate_directed_similarity_matrix(graph, directed_edge_list, alpha):
     genes = sorted(graph.nodes)
@@ -506,12 +522,33 @@ def generate_directed_similarity_matrix(graph, directed_edge_list, alpha):
     sim_matrix.data[np.isnan(sim_matrix.data)] = 0.0
     return alpha*sim_matrix, genes
 
+
 def propagate_directed_network(undirected_network, directed_edges, sources, args):
     propagate_alpha = args['propagation']['alpha']
     propagation_iterations = args['propagation']['n_iterations']
     propagation_epsilon = args['propagation']['eps']
     graph = nx.from_pandas_edgelist(undirected_network.reset_index(), 0, 1, 'edge_score')
     directed_similarity_matrix, genes = generate_directed_similarity_matrix(graph, directed_edges, args['propagation']['alpha'])
+    gene_id_to_idx = dict([(gene, index) for (index, gene) in enumerate(genes)])
+    gene_idx_to_id = {xx: x for x,xx in gene_id_to_idx.items()}
+    num_genes = len(gene_idx_to_id)
+    propagation_scores = []
+    for source in tqdm(sources.values(), total=len(sources), desc= 'propagating scores'):
+        propagation_scores.append(np.array(propagate([s for s in source],
+                                                     directed_similarity_matrix, gene_id_to_idx,
+                                                     num_genes, propagate_alpha, propagation_iterations,
+                                                     propagation_epsilon)))
+
+    col_id_to_idx = {xx:x for x,xx in gene_idx_to_id.items()}
+    return propagation_scores, col_id_to_idx
+
+
+def propagate_partially_directed_network(undirected_network, prob_ratios, sources, args):
+    propagate_alpha = args['propagation']['alpha']
+    propagation_iterations = args['propagation']['n_iterations']
+    propagation_epsilon = args['propagation']['eps']
+    graph = nx.from_pandas_edgelist(undirected_network.reset_index(), 0, 1, 'edge_score')
+    directed_similarity_matrix, genes = generate_partially_directed_similarity_matrix(graph, prob_ratios, args['propagation']['alpha'])
     gene_id_to_idx = dict([(gene, index) for (index, gene) in enumerate(genes)])
     gene_idx_to_id = {xx: x for x,xx in gene_id_to_idx.items()}
     num_genes = len(gene_idx_to_id)
